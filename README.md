@@ -1,6 +1,6 @@
 # Aircon Autopilot
 
-外気温（気象庁アメダス）と室温（Nature Remo）から、エアコンの設定温度・風量・電源を自動制御するアプリです。Webダッシュボードで現在の状況確認・手動操作・気温記録グラフの閲覧ができます。
+外気温（Open-Meteo、気象庁MSMモデル）と室温（Nature Remo）から、エアコンの設定温度・風量・電源を自動制御するアプリです。Webダッシュボードで現在の状況確認・手動操作・気温記録グラフの閲覧ができます。
 
 ![ダッシュボード](docs/dashboard.png)
 
@@ -32,17 +32,14 @@ cp .env.example .env
 
 Nature Remo のトークンは https://home.nature.global で発行できます。
 
-### アメダス観測所IDの調べ方
+### 自宅座標の設定
 
-既定は `44132`（東京）です。最寄りの観測所にする場合は、
-https://www.jma.go.jp/bosai/amedas/const/amedastable.json
-をブラウザで開き、地名（例: "横浜"）を検索してキー（例: `46106`）を `.env` の `AMEDAS_STATION` に設定してください。
-観測所の一覧は気象庁の [アメダス観測所一覧PDF](https://www.jma.go.jp/jma/kishou/know/amedas/ame_master.pdf) でも確認できます。
+既定は東京駅（`35.6812` / `139.7671`）です。最寄りの外気温にする場合は、Googleマップ等で
+自宅の場所を右クリックして表示される緯度・経度をコピーし、`.env` の `LATITUDE` / `LONGITUDE`
+に設定してください。
 
-**注意: 気温を観測している観測所を選んでください。** アメダスには雨量・積雪だけの観測所があり
-（例: `46061` 日吉）、そのIDを設定すると外気温が取得できず自動制御が動きません。
-上記PDFの観測種目に「温度」が含まれるか、amedastable.json ではなく
-実データ（`https://www.jma.go.jp/bosai/amedas/data/map/最新時刻.json`）に `temp` があるかで判断できます。
+外気温の取得元は [Open-Meteo](https://open-meteo.com/)（気象庁MSMモデル）で、APIキー不要・
+非商用利用は無料です。
 
 ## 起動
 
@@ -136,7 +133,7 @@ app/
 ├── controller.py  # 制御サイクル（取得→判定→操作→記録）
 ├── logic.py       # 判定マトリクス + ヒステリシス
 ├── remo.py        # Nature Remo クライアント（対応値への丸め含む）
-├── weather.py     # 気象庁アメダスから外気温取得
+├── weather.py     # Open-Meteo（気象庁MSMモデル）から外気温取得
 ├── store.py       # SQLite（記録 + 状態保存）
 ├── config.py      # .env 設定
 └── static/index.html  # ダッシュボード

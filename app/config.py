@@ -24,8 +24,9 @@ def _i(name: str, default: int) -> int:
 NATURE_ACCESS_TOKEN = os.environ.get("NATURE_ACCESS_TOKEN", "")
 
 # --- 任意 ---
-# アメダス観測所ID（既定: 44132 = 東京。README に主要IDの調べ方あり）
-AMEDAS_STATION = os.environ.get("AMEDAS_STATION", "44132")
+# 自宅の座標（Open-Meteo で外気温を取得。既定は東京駅）
+LATITUDE = _f("LATITUDE", 35.6812)
+LONGITUDE = _f("LONGITUDE", 139.7671)
 # 複数エアコンがある場合に対象を固定したいとき（未指定なら最初の AIRCON）
 APPLIANCE_ID = os.environ.get("APPLIANCE_ID", "")
 
