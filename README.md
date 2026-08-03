@@ -37,6 +37,12 @@ Nature Remo のトークンは https://home.nature.global で発行できます�
 既定は `44132`（東京）です。最寄りの観測所にする場合は、
 https://www.jma.go.jp/bosai/amedas/const/amedastable.json
 をブラウザで開き、地名（例: "横浜"）を検索してキー（例: `46106`）を `.env` の `AMEDAS_STATION` に設定してください。
+観測所の一覧は気象庁の [アメダス観測所一覧PDF](https://www.jma.go.jp/jma/kishou/know/amedas/ame_master.pdf) でも確認できます。
+
+**注意: 気温を観測している観測所を選んでください。** アメダスには雨量・積雪だけの観測所があり
+（例: `46061` 日吉）、そのIDを設定すると外気温が取得できず自動制御が動きません。
+上記PDFの観測種目に「温度」が含まれるか、amedastable.json ではなく
+実データ（`https://www.jma.go.jp/bosai/amedas/data/map/最新時刻.json`）に `temp` があるかで判断できます。
 
 ## 起動
 
