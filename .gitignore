@@ -1,0 +1,10 @@
+# 秘密情報（Nature Remoトークン）
+.env
+
+# 実行環境・生成物
+.venv/
+__pycache__/
+*.pyc
+
+# 記録データ（SQLite）
+data/

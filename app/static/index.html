@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Aircon Autopilot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --porcelain: #EEF3F6;
+    --card: #FFFFFF;
+    --ink: #1B2B3A;
+    --ink-soft: #5A6B7A;
+    --heat: #E0702E;
+    --room: #2E7FBE;
+    --setline: #8496A6;
+    --mint: #1FA97E;
+    --line: #DCE5EB;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--porcelain);
+    color: var(--ink);
+    font-family: "Zen Kaku Gothic New", sans-serif;
+    padding: 16px 14px calc(24px + env(safe-area-inset-bottom));
+    max-width: 760px;
+    margin: 0 auto;
+  }
+  .mono { font-family: "IBM Plex Mono", monospace; }
+
+  header {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  header h1 { font-size: 15px; font-weight: 700; letter-spacing: .06em; }
+  header .clock { font-size: 12px; color: var(--ink-soft); }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+
+  /* ---- 温度ブリッジ ---- */
+  .bridge-temps { display: flex; justify-content: space-between; align-items: flex-end; }
+  .temp-block .label { font-size: 11px; color: var(--ink-soft); letter-spacing: .1em; }
+  .temp-block .value { font-size: 42px; font-weight: 600; line-height: 1.1; }
+  .temp-block .value small { font-size: 18px; font-weight: 500; }
+  .temp-block.outdoor .value { color: var(--heat); }
+  .temp-block.room { text-align: right; }
+  .temp-block.room .value { color: var(--room); }
+  .bridge-bar {
+    position: relative; height: 10px; border-radius: 5px; margin: 14px 0 6px;
+    background: linear-gradient(90deg, var(--heat), var(--room));
+  }
+  .bridge-notch {
+    position: absolute; top: -5px; width: 3px; height: 20px; border-radius: 2px;
+    background: var(--ink); transition: left .6s ease;
+  }
+  .bridge-notch::after {
+    content: attr(data-label);
+    position: absolute; top: 22px; left: 50%; transform: translateX(-50%);
+    font-size: 10px; color: var(--ink-soft); white-space: nowrap;
+    font-family: "IBM Plex Mono", monospace;
+  }
+  .bridge-scale { display: flex; justify-content: space-between; font-size: 10px; color: var(--ink-soft); margin-bottom: 14px; }
+  .status-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .chip {
+    font-size: 11px; padding: 3px 10px; border-radius: 99px;
+    border: 1px solid var(--line); color: var(--ink-soft); background: var(--porcelain);
+  }
+  .chip.on { color: var(--mint); border-color: var(--mint); background: #E9F7F1; }
+  .chip.paused { color: var(--heat); border-color: #F2CBAF; background: #FDF2E9; }
+  .chip.heat { color: var(--heat); border-color: #F2CBAF; background: #FDF2E9; }
+  .note { font-size: 12px; color: var(--ink-soft); margin-top: 10px; line-height: 1.5; }
+
+  /* ---- 操作パネル ---- */
+  .panel-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .panel-head h2 { font-size: 13px; font-weight: 700; letter-spacing: .05em; }
+  .switch { position: relative; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+  .switch span.txt { font-size: 12px; color: var(--ink-soft); }
+  .switch input { display: none; }
+  .track {
+    width: 44px; height: 24px; border-radius: 99px; background: #C9D4DC; position: relative;
+    transition: background .2s;
+  }
+  .track::after {
+    content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
+    border-radius: 50%; background: #fff; transition: left .2s;
+    box-shadow: 0 1px 3px rgba(0,0,0,.25);
+  }
+  .switch input:checked + .track { background: var(--mint); }
+  .switch input:checked + .track::after { left: 23px; }
+
+  .ctrl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .ctrl { border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+  .ctrl .label { font-size: 10px; color: var(--ink-soft); letter-spacing: .08em; margin-bottom: 6px; }
+  .stepper { display: flex; align-items: center; justify-content: space-between; }
+  .stepper .val { font-size: 22px; font-weight: 600; }
+  button {
+    font-family: inherit; font-size: 13px; cursor: pointer;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--porcelain);
+    color: var(--ink); padding: 8px 12px;
+  }
+  button:disabled { opacity: .4; cursor: default; }
+  button.step { width: 36px; height: 36px; font-size: 18px; line-height: 1; }
+  button.primary { background: var(--ink); color: #fff; border-color: var(--ink); }
+  button.danger-ghost { color: #B0432A; }
+  .btn-row { display: flex; gap: 8px; margin-top: 12px; }
+  .btn-row button { flex: 1; }
+  select {
+    font-family: inherit; font-size: 14px; width: 100%; padding: 8px;
+    border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink);
+  }
+  .manual-lock { font-size: 11px; color: var(--ink-soft); margin-top: 10px; }
+
+  /* ---- グラフ ---- */
+  .range-chips { display: flex; gap: 6px; margin-bottom: 12px; }
+  .range-chips button { font-size: 12px; padding: 5px 12px; border-radius: 99px; }
+  .range-chips button.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .chart-wrap { position: relative; height: 260px; }
+  .empty { font-size: 12px; color: var(--ink-soft); text-align: center; padding: 40px 0; }
+
+  #toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%) translateY(20px);
+    background: var(--ink); color: #fff; font-size: 12px; padding: 10px 16px;
+    border-radius: 99px; opacity: 0; transition: all .3s; pointer-events: none;
+    max-width: 90vw; text-align: center;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>AIRCON AUTOPILOT</h1>
+  <div class="clock mono" id="clock">--:--</div>
+</header>
+
+<!-- 現在値 -->
+<section class="card">
+  <div class="bridge-temps">
+    <div class="temp-block outdoor">
+      <div class="label">外気温</div>
+      <div class="value mono" id="outdoorTemp">--<small>℃</small></div>
+    </div>
+    <div class="temp-block room">
+      <div class="label">室温</div>
+      <div class="value mono" id="roomTemp">--<small>℃</small></div>
+    </div>
+  </div>
+  <div class="bridge-bar">
+    <div class="bridge-notch" id="setNotch" data-label="設定--℃" style="left:50%"></div>
+  </div>
+  <div class="bridge-scale"><span>15℃</span><span>40℃</span></div>
+  <div class="status-row">
+    <span class="chip" id="powerChip">運転状況 --</span>
+    <span class="chip" id="autoChip">自動制御 --</span>
+    <span class="chip" id="humChip">湿度 --%</span>
+  </div>
+  <div class="note" id="lastNote">読み込み中…</div>
+</section>
+
+<!-- 操作パネル -->
+<section class="card">
+  <div class="panel-head">
+    <h2>操作パネル</h2>
+    <label class="switch">
+      <span class="txt">自動制御</span>
+      <input type="checkbox" id="autoToggle">
+      <div class="track"></div>
+    </label>
+  </div>
+  <div class="ctrl-grid">
+    <div class="ctrl">
+      <div class="label">設定温度</div>
+      <div class="stepper">
+        <button class="step" id="tempDown">−</button>
+        <div class="val mono" id="tempVal">--℃</div>
+        <button class="step" id="tempUp">＋</button>
+      </div>
+    </div>
+    <div class="ctrl">
+      <div class="label">風量</div>
+      <select id="volSelect"></select>
+    </div>
+  </div>
+  <div class="btn-row">
+    <button class="primary" id="applyBtn">この設定で運転</button>
+    <button class="danger-ghost" id="offBtn">停止</button>
+  </div>
+  <div class="manual-lock" id="manualHint"></div>
+</section>
+
+<!-- 記録グラフ -->
+<section class="card">
+  <div class="panel-head">
+    <h2>気温の記録</h2>
+    <button id="runNowBtn" style="font-size:11px">今すぐ判定</button>
+  </div>
+  <div class="range-chips" id="rangeChips">
+    <button data-h="6">6時間</button>
+    <button data-h="24" class="active">24時間</button>
+    <button data-h="72">3日</button>
+    <button data-h="168">7日</button>
+  </div>
+  <div class="chart-wrap"><canvas id="chart"></canvas></div>
+  <div class="empty" id="chartEmpty" style="display:none">まだ記録がありません。制御ループが動き始めると10分ごとに記録されます。</div>
+</section>
+
+<div id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+let state = null;         // /api/status の最新値
+let tempIdx = null;       // 温度候補の現在インデックス
+let rangeHours = 24;
+let chart = null;
+
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 3000);
+}
+
+function fmtTemp(v) {
+  return v == null ? "--" : Number(v).toFixed(1);
+}
+
+// ---------- 現在値の描画 ----------
+function renderStatus() {
+  if (!state) return;
+  $("outdoorTemp").innerHTML = fmtTemp(state.outdoor_temp) + "<small>℃</small>";
+  $("roomTemp").innerHTML = fmtTemp(state.room_temp) + "<small>℃</small>";
+  $("humChip").textContent = "湿度 " + (state.humidity != null ? Math.round(state.humidity) + "%" : "--");
+
+  const ac = state.aircon;
+  const powerChip = $("powerChip");
+  if (ac) {
+    powerChip.textContent = ac.power_on
+      ? `${ac.nickname} 冷房 ${ac.target_temp}℃`
+      : `${ac.nickname} 停止中`;
+    powerChip.className = "chip" + (ac.power_on ? " heat" : "");
+    // 温度ブリッジのノッチ位置（15〜40℃スケール）
+    const t = parseFloat(ac.target_temp);
+    if (!isNaN(t)) {
+      const pct = Math.min(100, Math.max(0, ((t - 15) / 25) * 100));
+      const notch = $("setNotch");
+      notch.style.left = pct + "%";
+      notch.dataset.label = `設定${t}℃`;
+    }
+  } else {
+    powerChip.textContent = "エアコン未検出";
+    powerChip.className = "chip";
+  }
+
+  const autoChip = $("autoChip");
+  const autoState = state.auto_state || (state.auto ? "on" : "off");
+  if (autoState === "paused_external") {
+    autoChip.textContent = "自動制御 一時停止中（外出オフ検知）";
+    autoChip.className = "chip paused";
+  } else {
+    autoChip.textContent = "自動制御 " + (state.auto ? "ON" : "OFF");
+    autoChip.className = "chip" + (state.auto ? " on" : "");
+  }
+  $("autoToggle").checked = state.auto;
+  $("lastNote").textContent = state.last_note || "";
+  if (autoState === "paused_external") {
+    $("manualHint").textContent = "外部操作でオフを検知したため自動制御を一時停止しています。エアコンをオンにすると自動再開します（スイッチでも再開できます）。";
+  } else {
+    $("manualHint").textContent = state.auto
+      ? "手動で操作すると自動制御は一時停止します（上のスイッチで再開）。"
+      : "自動制御は停止中です。スイッチをONにすると再開します。";
+  }
+
+  // 操作パネルの温度・風量候補
+  if (ac && ac.temp_options.length) {
+    if (tempIdx === null) {
+      const cur = ac.temp_options.indexOf(ac.target_temp);
+      tempIdx = cur >= 0 ? cur : Math.floor(ac.temp_options.length / 2);
+    }
+    tempIdx = Math.min(tempIdx, ac.temp_options.length - 1);
+    $("tempVal").textContent = ac.temp_options[tempIdx] + "℃";
+  }
+  const sel = $("volSelect");
+  if (ac && ac.vol_options.length && sel.options.length !== ac.vol_options.length) {
+    sel.innerHTML = "";
+    for (const v of ac.vol_options) {
+      const o = document.createElement("option");
+      o.value = v;
+      o.textContent = v === "auto" ? "自動" : v;
+      sel.appendChild(o);
+    }
+  }
+  if (ac && ac.air_volume && sel.value !== ac.air_volume) {
+    sel.value = ac.air_volume;
+  }
+}
+
+async function loadStatus() {
+  try {
+    const res = await fetch("/api/status");
+    state = await res.json();
+    renderStatus();
+  } catch (e) {
+    $("lastNote").textContent = "サーバーに接続できません";
+  }
+}
+
+// ---------- グラフ ----------
+async function loadHistory() {
+  const res = await fetch("/api/history?hours=" + rangeHours);
+  const { rows } = await res.json();
+  $("chartEmpty").style.display = rows.length ? "none" : "block";
+
+  const labels = rows.map(r => {
+    const d = new Date(r.ts);
+    return rangeHours <= 24
+      ? d.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })
+      : d.toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  });
+  const mk = (key) => rows.map(r => r[key]);
+
+  const data = {
+    labels,
+    datasets: [
+      { label: "外気温", data: mk("outdoor"), borderColor: css("--heat"),
+        backgroundColor: "transparent", borderWidth: 2, pointRadius: 0, tension: .3, spanGaps: true },
+      { label: "室温", data: mk("room"), borderColor: css("--room"),
+        backgroundColor: "transparent", borderWidth: 2, pointRadius: 0, tension: .3, spanGaps: true },
+      { label: "設定温度", data: mk("set_temp"), borderColor: css("--setline"),
+        backgroundColor: "transparent", borderWidth: 1.5, borderDash: [5, 4],
+        pointRadius: 0, stepped: true, spanGaps: true },
+    ],
+  };
+  const options = {
+    responsive: true, maintainAspectRatio: false, animation: false,
+    interaction: { mode: "index", intersect: false },
+    plugins: {
+      legend: { labels: { boxWidth: 18, boxHeight: 2, font: { size: 11 } } },
+      tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${c.parsed.y == null ? "--" : c.parsed.y.toFixed(1)}℃` } },
+    },
+    scales: {
+      x: { ticks: { maxTicksLimit: 6, font: { size: 10 } }, grid: { display: false } },
+      y: { ticks: { font: { size: 10 }, callback: (v) => v + "℃" }, grid: { color: css("--line") } },
+    },
+  };
+  if (chart) { chart.data = data; chart.options = options; chart.update(); }
+  else { chart = new Chart($("chart"), { type: "line", data, options }); }
+}
+
+// ---------- 操作 ----------
+$("autoToggle").addEventListener("change", async (e) => {
+  const enabled = e.target.checked;
+  await fetch("/api/auto", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  toast(enabled ? "自動制御を再開しました" : "自動制御を停止しました");
+  loadStatus();
+});
+
+$("tempDown").addEventListener("click", () => {
+  if (tempIdx !== null && tempIdx > 0) { tempIdx--; renderStatus(); }
+});
+$("tempUp").addEventListener("click", () => {
+  const ac = state && state.aircon;
+  if (ac && tempIdx !== null && tempIdx < ac.temp_options.length - 1) { tempIdx++; renderStatus(); }
+});
+
+async function manual(power) {
+  const ac = state && state.aircon;
+  if (!ac) return toast("エアコンが見つかりません");
+  const body = { power };
+  if (power === "on") {
+    body.target_temp = ac.temp_options[tempIdx] || null;
+    body.air_volume = $("volSelect").value || null;
+  }
+  const res = await fetch("/api/aircon", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) return toast("操作に失敗しました");
+  const j = await res.json();
+  toast(power === "off" ? "停止しました" : "設定を送信しました"
+    + (j.auto_paused ? "（自動制御は一時停止）" : ""));
+  loadStatus();
+}
+$("applyBtn").addEventListener("click", () => manual("on"));
+$("offBtn").addEventListener("click", () => manual("off"));
+
+$("runNowBtn").addEventListener("click", async () => {
+  $("runNowBtn").disabled = true;
+  try {
+    const res = await fetch("/api/run-now", { method: "POST" });
+    const j = await res.json();
+    toast(j.note || "判定を実行しました");
+    await loadStatus();
+    await loadHistory();
+  } finally {
+    $("runNowBtn").disabled = false;
+  }
+});
+
+$("rangeChips").addEventListener("click", (e) => {
+  const btn = e.target.closest("button[data-h]");
+  if (!btn) return;
+  rangeHours = Number(btn.dataset.h);
+  for (const b of $("rangeChips").querySelectorAll("button")) b.classList.toggle("active", b === btn);
+  loadHistory();
+});
+
+// ---------- 時計と定期更新 ----------
+function tickClock() {
+  $("clock").textContent = new Date().toLocaleString("ja-JP", {
+    timeZone: "Asia/Tokyo", month: "numeric", day: "numeric",
+    hour: "2-digit", minute: "2-digit",
+  }) + " JST";
+}
+tickClock();
+setInterval(tickClock, 30_000);
+loadStatus();
+loadHistory();
+setInterval(loadStatus, 30_000);
+setInterval(loadHistory, 5 * 60_000);
+</script>
+</body>
+</html>

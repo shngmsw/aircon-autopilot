@@ -1,0 +1,17 @@
+; ユーザーsystemdサービス（WSL2など sudo を使いたくない環境向け）
+;   cp aircon-autopilot.service ~/.config/systemd/user/
+;   systemctl --user daemon-reload && systemctl --user enable --now aircon-autopilot
+; %h はホームディレクトリに展開される。配置場所が違う場合はパスを書き換えること。
+; システム全体に入れる場合（Raspberry Pi 等）は README の systemd 例を参照。
+
+[Unit]
+Description=Aircon Autopilot
+
+[Service]
+WorkingDirectory=%h/aircon-autopilot
+ExecStart=%h/aircon-autopilot/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
