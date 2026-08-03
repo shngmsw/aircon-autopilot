@@ -227,6 +227,7 @@ let state = null;         // /api/status の最新値
 let tempIdx = null;       // 温度候補の現在インデックス
 let rangeHours = 24;
 let chart = null;
+let histRows = [];        // グラフ表示中の履歴行（powerBands・ツールチップが参照）
 
 function toast(msg) {
   const t = $("toast");
@@ -320,9 +321,36 @@ async function loadStatus() {
 }
 
 // ---------- グラフ ----------
+const MINT_BAND = "rgba(31, 169, 126, .12)";  // --mint の薄塗り
+
+// 冷房ON区間の背景帯を描くプラグイン
+const powerBands = {
+  id: "powerBands",
+  beforeDatasetsDraw(chart) {
+    const { ctx, chartArea, scales } = chart;
+    if (!chartArea || !histRows.length) return;
+    const px = (i) => scales.x.getPixelForValue(i);
+    ctx.save();
+    ctx.fillStyle = MINT_BAND;
+    const n = histRows.length;
+    let i = 0;
+    while (i < n) {
+      if (histRows[i].power !== "on") { i++; continue; }
+      let j = i;
+      while (j + 1 < n && histRows[j + 1].power === "on") j++;
+      const left = i === 0 ? chartArea.left : (px(i - 1) + px(i)) / 2;
+      const right = j === n - 1 ? chartArea.right : (px(j) + px(j + 1)) / 2;
+      ctx.fillRect(left, chartArea.top, right - left, chartArea.bottom - chartArea.top);
+      i = j + 1;
+    }
+    ctx.restore();
+  },
+};
+
 async function loadHistory() {
   const res = await fetch("/api/history?hours=" + rangeHours);
   const { rows } = await res.json();
+  histRows = rows;
   $("chartEmpty").style.display = rows.length ? "none" : "block";
 
   const labels = rows.map(r => {
@@ -340,9 +368,11 @@ async function loadHistory() {
         backgroundColor: "transparent", borderWidth: 2, pointRadius: 0, tension: .3, spanGaps: true },
       { label: "室温", data: mk("room"), borderColor: css("--room"),
         backgroundColor: "transparent", borderWidth: 2, pointRadius: 0, tension: .3, spanGaps: true },
-      { label: "設定温度", data: mk("set_temp"), borderColor: css("--setline"),
-        backgroundColor: "transparent", borderWidth: 1.5, borderDash: [5, 4],
-        pointRadius: 0, stepped: true, spanGaps: true },
+      { label: "設定温度", data: rows.map(r => r.power === "on" ? r.set_temp : null),
+        borderColor: css("--setline"), backgroundColor: "transparent",
+        borderWidth: 1.5, borderDash: [5, 4], pointRadius: 0, stepped: true, spanGaps: false },
+      { label: "冷房ON", data: [], borderColor: MINT_BAND,
+        backgroundColor: MINT_BAND, borderWidth: 6 },
     ],
   };
   const options = {
@@ -350,7 +380,13 @@ async function loadHistory() {
     interaction: { mode: "index", intersect: false },
     plugins: {
       legend: { labels: { boxWidth: 18, boxHeight: 2, font: { size: 11 } } },
-      tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${c.parsed.y == null ? "--" : c.parsed.y.toFixed(1)}℃` } },
+      tooltip: { callbacks: {
+        label: (c) => ` ${c.dataset.label}: ${c.parsed.y == null ? "--" : c.parsed.y.toFixed(1)}℃`,
+        afterBody: (items) => {
+          const r = items.length ? histRows[items[0].dataIndex] : null;
+          return r ? `運転: ${r.power === "on" ? "ON" : "OFF"}` : "";
+        },
+      } },
     },
     scales: {
       x: { ticks: { maxTicksLimit: 6, font: { size: 10 } }, grid: { display: false } },
@@ -358,7 +394,7 @@ async function loadHistory() {
     },
   };
   if (chart) { chart.data = data; chart.options = options; chart.update(); }
-  else { chart = new Chart($("chart"), { type: "line", data, options }); }
+  else { chart = new Chart($("chart"), { type: "line", data, options, plugins: [powerBands] }); }
 }
 
 // ---------- 操作 ----------
