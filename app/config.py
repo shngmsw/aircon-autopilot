@@ -20,6 +20,13 @@ def _i(name: str, default: int) -> int:
     return int(os.environ.get(name, default))
 
 
+def _b(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
 # --- 必須 ---
 NATURE_ACCESS_TOKEN = os.environ.get("NATURE_ACCESS_TOKEN", "")
 
@@ -34,6 +41,14 @@ CONTROL_INTERVAL_MIN = _i("CONTROL_INTERVAL_MIN", 10)   # 制御ループの間�
 MIN_HOLD_MIN = _i("MIN_HOLD_MIN", 15)                   # 一度操作したら最低これだけ維持
 HYSTERESIS = _f("HYSTERESIS", 0.7)                      # 温度帯の切替に必要な余裕(℃)
 ROOM_TEMP_OFFSET = _f("ROOM_TEMP_OFFSET", 0.0)          # Remoセンサー補正(自己発熱なら -1.0 など)
+
+# --- 外気冷却モード（free cooling） ---
+# 外気が十分涼しいときは冷房をやめて送風に切り替える（送風非対応機なら電源オフ）。
+FREE_COOL_ENABLED = _b("FREE_COOL_ENABLED", True)
+FREE_COOL_OUT_MAX = _f("FREE_COOL_OUT_MAX", 25.0)       # 突入できる外気温の上限(℃)
+FREE_COOL_HUMID_MAX = _f("FREE_COOL_HUMID_MAX", 70.0)   # 突入できる湿度の上限(%)
+FREE_COOL_ABORT_ROOM = _f("FREE_COOL_ABORT_ROOM", 29.0) # この室温以上なら冷房へ復帰(℃)
+FREE_COOL_LOCKOUT_MIN = _i("FREE_COOL_LOCKOUT_MIN", 90) # 復帰後この時間は再突入しない(分)
 
 DB_PATH = os.environ.get("DB_PATH", str(BASE_DIR / "data" / "aircon.db"))
 HOST = os.environ.get("HOST", "0.0.0.0")

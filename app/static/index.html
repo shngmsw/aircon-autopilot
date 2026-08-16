@@ -166,6 +166,7 @@
     <span class="chip" id="powerChip">運転状況 --</span>
     <span class="chip" id="autoChip">自動制御 --</span>
     <span class="chip" id="humChip">湿度 --%</span>
+    <span class="chip" id="freeCoolChip" style="display:none">外気冷却中</span>
   </div>
   <div class="note" id="lastNote">読み込み中…</div>
 </section>
@@ -196,6 +197,7 @@
   </div>
   <div class="btn-row">
     <button class="primary" id="applyBtn">この設定で運転</button>
+    <button id="blowBtn">送風</button>
     <button class="danger-ghost" id="offBtn">停止</button>
   </div>
   <div class="manual-lock" id="manualHint"></div>
@@ -249,16 +251,22 @@ function renderStatus() {
 
   const ac = state.aircon;
   const powerChip = $("powerChip");
+  const notch = $("setNotch");
   if (ac) {
-    powerChip.textContent = ac.power_on
-      ? `${ac.nickname} 冷房 ${ac.target_temp}℃`
-      : `${ac.nickname} 停止中`;
+    const blowing = ac.power_on && ac.mode === "blow";
+    powerChip.textContent = !ac.power_on
+      ? `${ac.nickname} 停止中`
+      : blowing
+        ? `${ac.nickname} 送風`
+        : `${ac.nickname} 冷房 ${ac.target_temp}℃`;
     powerChip.className = "chip" + (ac.power_on ? " heat" : "");
-    // 温度ブリッジのノッチ位置（15〜40℃スケール）
+    // 温度ブリッジのノッチ位置（15〜40℃スケール）。送風中は設定温度が無いので隠す
     const t = parseFloat(ac.target_temp);
-    if (!isNaN(t)) {
+    if (blowing || isNaN(t)) {
+      notch.style.display = "none";
+    } else {
+      notch.style.display = "";
       const pct = Math.min(100, Math.max(0, ((t - 15) / 25) * 100));
-      const notch = $("setNotch");
       notch.style.left = pct + "%";
       notch.dataset.label = `設定${t}℃`;
     }
@@ -266,6 +274,23 @@ function renderStatus() {
     powerChip.textContent = "エアコン未検出";
     powerChip.className = "chip";
   }
+
+  // 外気冷却モードの状況（送風中か、復帰後の再突入禁止中か）
+  const fc = state.free_cool || {};
+  const fcChip = $("freeCoolChip");
+  if (fc.active) {
+    fcChip.style.display = "";
+    fcChip.className = "chip on";
+    fcChip.textContent = "外気冷却中";
+  } else if (fc.lockout_until) {
+    const t = new Date(fc.lockout_until).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+    fcChip.style.display = "";
+    fcChip.className = "chip";
+    fcChip.textContent = `送風休止 ${t}まで`;
+  } else {
+    fcChip.style.display = "none";
+  }
+  $("blowBtn").disabled = !(ac && ac.supports_blow);
 
   const autoChip = $("autoChip");
   const autoState = state.auto_state || (state.auto ? "on" : "off");
@@ -368,10 +393,10 @@ async function loadHistory() {
         backgroundColor: "transparent", borderWidth: 2, pointRadius: 0, tension: .3, spanGaps: true },
       { label: "室温", data: mk("room"), borderColor: css("--room"),
         backgroundColor: "transparent", borderWidth: 2, pointRadius: 0, tension: .3, spanGaps: true },
-      { label: "設定温度", data: rows.map(r => r.power === "on" ? r.set_temp : null),
+      { label: "設定温度", data: rows.map(r => (r.power === "on" && r.mode !== "blow") ? r.set_temp : null),
         borderColor: css("--setline"), backgroundColor: "transparent",
         borderWidth: 1.5, borderDash: [5, 4], pointRadius: 0, stepped: true, spanGaps: false },
-      { label: "冷房ON", data: [], borderColor: MINT_BAND,
+      { label: "運転ON", data: [], borderColor: MINT_BAND,
         backgroundColor: MINT_BAND, borderWidth: 6 },
     ],
   };
@@ -384,7 +409,9 @@ async function loadHistory() {
         label: (c) => ` ${c.dataset.label}: ${c.parsed.y == null ? "--" : c.parsed.y.toFixed(1)}℃`,
         afterBody: (items) => {
           const r = items.length ? histRows[items[0].dataIndex] : null;
-          return r ? `運転: ${r.power === "on" ? "ON" : "OFF"}` : "";
+          if (!r) return "";
+          const label = r.power !== "on" ? "OFF" : (r.mode === "blow" ? "送風" : "冷房");
+          return `運転: ${label}`;
         },
       } },
     },
@@ -416,13 +443,17 @@ $("tempUp").addEventListener("click", () => {
   if (ac && tempIdx !== null && tempIdx < ac.temp_options.length - 1) { tempIdx++; renderStatus(); }
 });
 
-async function manual(power) {
+async function manual(power, mode) {
   const ac = state && state.aircon;
   if (!ac) return toast("エアコンが見つかりません");
   const body = { power };
   if (power === "on") {
-    body.target_temp = ac.temp_options[tempIdx] || null;
-    body.air_volume = $("volSelect").value || null;
+    body.mode = mode || "cool";
+    if (body.mode === "cool") {
+      // 送風は温度指定が不要で、風量の候補も冷房と異なることがあるため送らない
+      body.target_temp = ac.temp_options[tempIdx] || null;
+      body.air_volume = $("volSelect").value || null;
+    }
   }
   const res = await fetch("/api/aircon", {
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -430,11 +461,13 @@ async function manual(power) {
   });
   if (!res.ok) return toast("操作に失敗しました");
   const j = await res.json();
-  toast(power === "off" ? "停止しました" : "設定を送信しました"
-    + (j.auto_paused ? "（自動制御は一時停止）" : ""));
+  const done = power === "off" ? "停止しました"
+    : mode === "blow" ? "送風に切り替えました" : "設定を送信しました";
+  toast(done + (j.auto_paused ? "（自動制御は一時停止）" : ""));
   loadStatus();
 }
-$("applyBtn").addEventListener("click", () => manual("on"));
+$("applyBtn").addEventListener("click", () => manual("on", "cool"));
+$("blowBtn").addEventListener("click", () => manual("on", "blow"));
 $("offBtn").addEventListener("click", () => manual("off"));
 
 $("runNowBtn").addEventListener("click", async () => {

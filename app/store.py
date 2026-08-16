@@ -30,13 +30,23 @@ def _connect() -> sqlite3.Connection:
                 power TEXT,
                 auto INTEGER,
                 action TEXT,
-                note TEXT
+                note TEXT,
+                mode TEXT
             );
             CREATE INDEX IF NOT EXISTS idx_readings_ts ON readings(ts);
             CREATE TABLE IF NOT EXISTS state (k TEXT PRIMARY KEY, v TEXT);
             """
         )
+        _migrate(_conn)
     return _conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """既存DBに後から足したカラムを追加する（データは消さない）。"""
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(readings)")}
+    if "mode" not in cols:
+        conn.execute("ALTER TABLE readings ADD COLUMN mode TEXT")
+        conn.commit()
 
 
 def now_jst() -> datetime:
@@ -104,17 +114,18 @@ def add_reading(
     auto: bool,
     action: str,
     note: str = "",
+    mode: str | None = None,
 ) -> None:
     with _lock:
         conn = _connect()
         conn.execute(
             """INSERT INTO readings
-               (ts, outdoor, room, humidity, set_temp, air_volume, power, auto, action, note)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+               (ts, outdoor, room, humidity, set_temp, air_volume, power, auto, action, note, mode)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 now_jst().isoformat(timespec="seconds"),
                 outdoor, room, humidity, set_temp, air_volume, power,
-                1 if auto else 0, action, note,
+                1 if auto else 0, action, note, mode,
             ),
         )
         conn.commit()

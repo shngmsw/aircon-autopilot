@@ -1,0 +1,3 @@
+# 開発・テスト用（本番は requirements.txt のみで動く）
+-r requirements.txt
+pytest>=8.0

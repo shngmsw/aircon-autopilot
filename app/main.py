@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from . import config, controller, remo, store
+from . import config, controller, logic, remo, store
 
 logging.basicConfig(
     level=logging.INFO,
@@ -69,6 +69,7 @@ class AirconBody(BaseModel):
     power: str                      # "on" / "off"
     target_temp: str | None = None
     air_volume: str | None = None
+    mode: str | None = None         # "cool"(既定) / "blow" など
 
 
 @app.get("/api/status")
@@ -76,6 +77,7 @@ async def status():
     snap = await remo.fetch_snapshot(_client)
     latest = store.latest_reading()
     aircon = snap.aircon
+    lockout_active, lockout_until = controller.free_cool_lockout()
     return {
         "now": store.now_jst().isoformat(timespec="seconds"),
         "auto": store.auto_enabled(),
@@ -91,7 +93,17 @@ async def status():
             "air_volume": aircon.air_volume,
             "temp_options": aircon.temp_options,
             "vol_options": aircon.vol_options,
+            "modes": aircon.modes,
+            "supports_blow": remo.supports_mode(aircon, logic.BLOW_MODE),
         } if aircon else None,
+        "free_cool": {
+            "enabled": config.FREE_COOL_ENABLED,
+            "active": bool(store.get_state("free_cool_active", False)),
+            "lockout_until": (
+                lockout_until.isoformat(timespec="seconds")
+                if lockout_active and lockout_until else None
+            ),
+        },
         "last_note": latest["note"] if latest else "",
         "interval_min": config.CONTROL_INTERVAL_MIN,
     }
@@ -111,6 +123,7 @@ async def set_auto(body: AutoBody):
         # 再開時は帯の記憶をリセットして現況から判定し直す
         store.set_state("last_out_tier", None)
         store.set_state("last_room_tier", None)
+        store.set_state("free_cool_active", False)
     return {"auto": store.auto_enabled(), "auto_state": store.auto_state()}
 
 
@@ -123,10 +136,15 @@ async def manual_control(body: AirconBody):
     if body.power not in ("on", "off"):
         raise HTTPException(400, "power は on / off を指定してください")
 
+    mode = body.mode or "cool"
+    if body.power == "on" and snap.aircon.modes and mode not in snap.aircon.modes:
+        raise HTTPException(400, f"この機種は運転モード {mode} に対応していません")
+
     was_auto = store.auto_enabled()
     try:
         await remo.apply_settings(
-            _client, snap.aircon, body.power, body.target_temp, body.air_volume
+            _client, snap.aircon, body.power, body.target_temp, body.air_volume,
+            mode=mode,
         )
     except remo.RemoError as e:
         raise HTTPException(502, str(e))
@@ -144,7 +162,9 @@ async def manual_control(body: AirconBody):
         auto=False,
         action="manual",
         note="手動操作"
+        + ("（送風）" if body.power == "on" and mode == logic.BLOW_MODE else "")
         + ("（自動制御を一時停止しました）" if was_auto else ""),
+        mode=mode if body.power == "on" else None,
     )
     return {"ok": True, "auto": False, "auto_paused": was_auto}
 
