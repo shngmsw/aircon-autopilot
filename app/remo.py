@@ -28,8 +28,11 @@ class AirconState:
     mode: str                 # 現在の運転モード (cool など)
     target_temp: str          # 現在の設定温度（文字列のまま保持）
     air_volume: str           # 現在の風量
-    temp_options: list[str] = field(default_factory=list)  # 機種が受ける温度一覧
-    vol_options: list[str] = field(default_factory=list)   # 機種が受ける風量一覧
+    temp_options: list[str] = field(default_factory=list)  # 機種が受ける温度一覧(cool用・後方互換)
+    vol_options: list[str] = field(default_factory=list)   # 機種が受ける風量一覧(cool用・後方互換)
+    modes: list[str] = field(default_factory=list)         # 機種が対応する運転モード名
+    # モード別の対応値: {"cool": {"temp": [...], "vol": [...]}, "blow": {...}}
+    mode_options: dict[str, dict[str, list[str]]] = field(default_factory=dict)
 
 
 @dataclass
@@ -44,6 +47,46 @@ def _headers() -> dict:
         "Authorization": f"Bearer {config.NATURE_ACCESS_TOKEN}",
         "accept": "application/json",
     }
+
+
+def _parse_mode_options(appliance: dict) -> dict[str, dict[str, list[str]]]:
+    """家電情報の range.modes を全モード分パースする。
+
+    返り値は {"cool": {"temp": [...], "vol": [...]}, "blow": {...}, ...}。
+    送風(blow)は温度を持たないことが多く、その場合 temp は空リストになる。
+    """
+    raw = (appliance.get("aircon") or {}).get("range", {}).get("modes", {}) or {}
+    out: dict[str, dict[str, list[str]]] = {}
+    for name, spec in raw.items():
+        if not isinstance(spec, dict):
+            continue
+        out[str(name)] = {
+            "temp": [str(t) for t in spec.get("temp", []) if str(t)],
+            "vol": [str(v) for v in spec.get("vol", []) if str(v)],
+        }
+    return out
+
+
+def supports_mode(aircon: AirconState, mode: str) -> bool:
+    """機種がその運転モードに対応しているか。"""
+    return mode in aircon.modes
+
+
+def mode_temp_options(aircon: AirconState, mode: str) -> list[str]:
+    """指定モードで機種が受け付ける温度一覧。"""
+    opts = aircon.mode_options.get(mode)
+    if opts is None:
+        # モード情報が取れなかった場合は従来どおり cool用の一覧で代用する
+        return aircon.temp_options if mode == "cool" else []
+    return opts.get("temp", [])
+
+
+def mode_vol_options(aircon: AirconState, mode: str) -> list[str]:
+    """指定モードで機種が受け付ける風量一覧。"""
+    opts = aircon.mode_options.get(mode)
+    if opts is None:
+        return aircon.vol_options if mode == "cool" else []
+    return opts.get("vol", [])
 
 
 async def fetch_snapshot(client: httpx.AsyncClient) -> Snapshot:
@@ -72,7 +115,8 @@ async def fetch_snapshot(client: httpx.AsyncClient) -> Snapshot:
             if config.APPLIANCE_ID and a["id"] != config.APPLIANCE_ID:
                 continue
             settings = a.get("settings") or {}
-            cool = (a.get("aircon", {}).get("range", {}).get("modes", {}).get("cool", {}))
+            mode_options = _parse_mode_options(a)
+            cool = mode_options.get("cool", {})
             aircon = AirconState(
                 appliance_id=a["id"],
                 nickname=a.get("nickname", "エアコン"),
@@ -80,8 +124,10 @@ async def fetch_snapshot(client: httpx.AsyncClient) -> Snapshot:
                 mode=settings.get("mode", ""),
                 target_temp=str(settings.get("temp", "")),
                 air_volume=str(settings.get("vol", "")),
-                temp_options=[str(t) for t in cool.get("temp", []) if str(t)],
-                vol_options=[str(v) for v in cool.get("vol", []) if str(v)],
+                temp_options=cool.get("temp", []),
+                vol_options=cool.get("vol", []),
+                modes=list(mode_options.keys()),
+                mode_options=mode_options,
             )
             break
     except Exception:
@@ -125,18 +171,27 @@ async def apply_settings(
     power: str,               # "on" / "off"
     target_temp: str | None = None,
     air_volume: str | None = None,
+    mode: str = "cool",       # "cool" / "blow" など
 ) -> None:
-    """エアコンへ設定を送信する。offなら電源オフのみ送る。"""
+    """エアコンへ設定を送信する。offなら電源オフのみ送る。
+
+    送風など温度を持たないモードでは temperature を送らない（機種によっては
+    受け付けずエラーになる）。モード情報が取れていない場合は従来どおり送る。
+    """
     url = f"{API}/appliances/{aircon.appliance_id}/aircon_settings"
     if power == "off":
         payload = {"button": "power-off"}
     else:
-        payload = {"operation_mode": "cool", "button": ""}
-        if target_temp:
+        payload = {"operation_mode": mode, "button": ""}
+        known = aircon.mode_options.get(mode)
+        accepts_temp = known is None or bool(known.get("temp"))
+        if target_temp and accepts_temp:
             payload["temperature"] = target_temp
         if air_volume:
             payload["air_volume"] = air_volume
     res = await client.post(url, headers=_headers(), data=payload, timeout=config.HTTP_TIMEOUT)
     if res.status_code >= 400:
         raise RemoError(f"エアコン操作に失敗: HTTP {res.status_code} {res.text[:200]}")
-    log.info("エアコン操作: power=%s temp=%s vol=%s", power, target_temp, air_volume)
+    log.info(
+        "エアコン操作: power=%s mode=%s temp=%s vol=%s", power, mode, target_temp, air_volume
+    )
