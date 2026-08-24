@@ -73,6 +73,7 @@ async def run_cycle(client: httpx.AsyncClient) -> dict:
             store.set_state("last_out_tier", None)
             store.set_state("last_room_tier", None)
             store.set_state("free_cool_active", False)
+            store.set_state("free_cool_start_room", None)
             skip_hold_check = True
             note_prefix = "外部オンを検知 → 自動制御を再開。"
         elif state == "paused_external" and actual_power == "off":
@@ -106,10 +107,19 @@ async def run_cycle(client: httpx.AsyncClient) -> dict:
             free_cool_out_max=config.FREE_COOL_OUT_MAX,
             free_cool_humid_max=config.FREE_COOL_HUMID_MAX,
             free_cool_abort_room=config.FREE_COOL_ABORT_ROOM,
+            free_cool_start_room=store.get_state("free_cool_start_room"),
+            free_cool_rise_min=config.FREE_COOL_RISE_MIN,
+            cool_out_hot_target=config.COOL_OUT_HOT_TARGET,
         )
         store.set_state("last_out_tier", d.out_tier)
         store.set_state("last_room_tier", d.room_tier)
+        was_free_cool = bool(store.get_state("free_cool_active", False))
         store.set_state("free_cool_active", d.free_cool)
+        if d.free_cool and not was_free_cool:
+            # 送風開始時の室温を覚えておき、復帰判定の基準にする
+            store.set_state("free_cool_start_room", room)
+        elif not d.free_cool:
+            store.set_state("free_cool_start_room", None)
         reason = d.reason
         if d.free_cool_abort:
             # 室温上昇で冷房へ復帰した回。しばらく送風へ戻さない

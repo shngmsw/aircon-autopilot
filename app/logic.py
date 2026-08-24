@@ -84,7 +84,7 @@ MATRIX: dict[tuple[int, int], tuple[str, float | None, str | None]] = {
     (1, 0): ("on", 22.0, "auto"),
     (1, 1): ("on", 24.0, "auto"),
     (1, 2): ("on", 26.0, "min"),
-    (2, 0): ("on", 25.0, "min"),
+    (2, 0): ("on", 27.0, "min"),    # 外が涼しければ軽く冷やすだけでよい
     (2, 1): ("on", 26.0, "min"),
     (2, 2): ("off", None, None),    # 外も中も涼しければ停止
 }
@@ -102,17 +102,29 @@ def decide(
     free_cool_enabled: bool = True,
     free_cool_out_max: float = 25.0,
     free_cool_humid_max: float = 70.0,
-    free_cool_abort_room: float = 29.0,
+    free_cool_abort_room: float = 30.5,
+    free_cool_start_room: float | None = None,
+    free_cool_rise_min: float = 0.5,
+    cool_out_hot_target: float | None = None,
 ) -> Decision:
     """外気温・室温・湿度から運転内容を決める（純粋関数）。
 
     設定値は呼び出し側（controller）から渡す。外気冷却モードの判定には
     前回それが有効だったか(last_free_cool)と、復帰直後のロックアウト中か
     (lockout_active)を使う。
+
+    冷房への復帰は「室温が free_cool_abort_room 以上」かつ「送風を始めた
+    ときの室温(free_cool_start_room)より free_cool_rise_min 以上上がった」
+    ときだけ行う。室温が高くても横ばい〜下降なら、外が涼しい限り送風のまま。
+    free_cool_start_room が None（旧状態・情報なし）なら絶対値だけで判定する。
+
+    cool_out_hot_target を渡すと (涼しい×暑い) の冷房目標温度を上書きする。
     """
     out_tier = tier_with_hysteresis(outdoor, OUT_THRESHOLDS, last_out_tier, hyst)
     room_tier = tier_with_hysteresis(room, ROOM_THRESHOLDS, last_room_tier, hyst)
     power, temp, vol = MATRIX[(out_tier, room_tier)]
+    if cool_out_hot_target is not None and (out_tier, room_tier) == (2, 0):
+        temp = cool_out_hot_target
     mode = "cool" if power == "on" else None
     reason = f"外気{OUT_LABELS[out_tier]}({outdoor:.1f}℃) × 室内{ROOM_LABELS[room_tier]}({room:.1f}℃)"
 
@@ -122,13 +134,20 @@ def decide(
     if free_cool_enabled:
         # 湿度が取れないときは条件を満たすものとして扱う
         humid_ok = humidity is None or humidity <= free_cool_humid_max
-        room_ok = room < free_cool_abort_room
+        too_hot = room >= free_cool_abort_room
+        risen = (
+            free_cool_start_room is None
+            or room >= free_cool_start_room + free_cool_rise_min
+        )
         out_ok = free_cool_out_ok(outdoor, free_cool_out_max, last_free_cool, hyst)
+        # 新規に送風へ入るときは復帰しきい値未満であること。
+        # すでに送風中なら、室温が高くても「上がっていない」限り続ける。
+        room_ok = (not too_hot) or last_free_cool
 
-        if last_free_cool and not room_ok:
-            # 室温が上がりきったので冷房へ復帰。以後しばらくは再突入しない
+        if last_free_cool and too_hot and risen:
+            # 室温が上がり続けているので冷房へ復帰。以後しばらくは再突入しない
             free_cool_abort = True
-            reason += f" → 室温{room:.1f}℃のため冷房に復帰"
+            reason += f" → 室温{room:.1f}℃まで上昇したため冷房に復帰"
         elif power == "on" and out_ok and humid_ok and room_ok and not lockout_active:
             if room_tier == COMFORT_ROOM_TIER:
                 # 室内も快適な帯なら送風すら不要（従来どおり電源オフ）

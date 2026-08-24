@@ -47,8 +47,13 @@ ROOM_TEMP_OFFSET = _f("ROOM_TEMP_OFFSET", 0.0)          # Remoセンサー補正
 FREE_COOL_ENABLED = _b("FREE_COOL_ENABLED", True)
 FREE_COOL_OUT_MAX = _f("FREE_COOL_OUT_MAX", 25.0)       # 突入できる外気温の上限(℃)
 FREE_COOL_HUMID_MAX = _f("FREE_COOL_HUMID_MAX", 70.0)   # 突入できる湿度の上限(%)
-FREE_COOL_ABORT_ROOM = _f("FREE_COOL_ABORT_ROOM", 29.0) # この室温以上なら冷房へ復帰(℃)
-FREE_COOL_LOCKOUT_MIN = _i("FREE_COOL_LOCKOUT_MIN", 90) # 復帰後この時間は再突入しない(分)
+FREE_COOL_ABORT_ROOM = _f("FREE_COOL_ABORT_ROOM", 30.5) # この室温以上なら冷房へ復帰(℃)
+FREE_COOL_RISE_MIN = _f("FREE_COOL_RISE_MIN", 0.5)      # 復帰には送風開始時からこれだけ上昇が必要(℃)
+FREE_COOL_LOCKOUT_MIN = _i("FREE_COOL_LOCKOUT_MIN", 45) # 復帰後この時間は再突入しない(分)
+
+# 外気が涼しい(<28℃)のに室温が暑い(≥27℃)ときの冷房目標温度(℃)。
+# 外が涼しければ軽く冷やすだけでよく、25℃だと全力運転でエアコン近くが寒くなる
+COOL_OUT_HOT_TARGET = _f("COOL_OUT_HOT_TARGET", 27.0)
 
 DB_PATH = os.environ.get("DB_PATH", str(BASE_DIR / "data" / "aircon.db"))
 HOST = os.environ.get("HOST", "0.0.0.0")
