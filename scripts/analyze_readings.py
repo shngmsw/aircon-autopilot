@@ -233,18 +233,42 @@ def section_simulation(rows: list[dict], step: float) -> list[str]:
            f"- 冷房ON時 : a={a_on:.3f}, b={b_on:.2f}（{n_on}サンプル）", ""]
     if n_off < 20 or n_on < 20:
         return out + ["サンプル不足のためシミュレーションは省略。", ""]
+
+    # 冷房ONのサンプルは大半が「目標に到達して維持している」状態なので、
+    # そこから回帰すると冷却能力が過小評価される。外気が室温より高いときに
+    # 室温が下がらないモデルになっていたら、結果は参考値でしかない旨を明示する。
+    # 判定は「外気が室温より高い暑い側」で行う。冷房ON中の外気−室温は中央値が
+    # マイナス（夜間など）になりがちで、そこだけ見ると異常を見逃す。
+    hot_gaps = [r["outdoor"] - r["room"] for r in rows if r["cooling"]
+                and r["outdoor"] > r["room"]]
+    typical_gap = statistics.median(hot_gaps) if hot_gaps else 0.0
+    if a_on * typical_gap + b_on >= 0:
+        out += [
+            "> **注意: 以下のシミュレーションは参考値。**",
+            f"> 冷房ON時のモデルは、外気が室温より{typical_gap:.1f}℃高い典型条件で "
+            f"dRoom/dt={a_on * typical_gap + b_on:+.2f}℃/時 となり、室温が下がらない。",
+            "> 冷房ONのサンプルの多くが既に目標温度へ到達した維持状態のため、"
+            "冷却能力が過小評価されている。",
+            "> そのため停止しきい値を下げるほど冷房ONが伸び、実測を上回る値が出る。"
+            "しきい値どうしの大小比較には使えない。",
+            "",
+        ]
+
     actual_on = sum(step for r in rows if r["cooling"])
     out += ["現状（実測）の冷房ON: " + fmt_h(actual_on), "",
-            "| 停止しきい値 | 再開しきい値 | 冷房ON | 削減 | 切替回数 | 切替/日 |",
+            "| 停止しきい値 | 再開しきい値 | 冷房ON | 実測比 | 切替回数 | 切替/日 |",
             "|---|---|---|---|---|---|"]
     days = max((rows[-1]["t"] - rows[0]["t"]).total_seconds() / 86400, 0.01)
     for off_at in (25.0, 24.5, 24.0, 23.5):
         for hyst in (0.7, 1.5):
             on_at = off_at + hyst
             on_min, sw = simulate(rows, off_at, on_at, (a_off, b_off), (a_on, b_on))
-            red = (1 - on_min / actual_on) * 100 if actual_on else 0
-            out.append(f"| {off_at}℃ | {on_at}℃ | {fmt_h(on_min)} | {red:+.0f}% | {sw} | {sw / days:.1f} |")
-    out += ["", "切替/日が多すぎる（目安 >10）と機器に負担なので、再開しきい値の幅を広げる方向で調整する。", ""]
+            # 実測比: マイナスが削減、プラスが増加。
+            diff = (on_min / actual_on - 1) * 100 if actual_on else 0
+            out.append(f"| {off_at}℃ | {on_at}℃ | {fmt_h(on_min)} | {diff:+.0f}% | {sw} | {sw / days:.1f} |")
+    out += ["",
+            "「実測比」はマイナスが冷房ONの削減、プラスが増加。",
+            "切替/日が多すぎる（目安 >10）と機器に負担なので、再開しきい値の幅を広げる方向で調整する。", ""]
     return out
 
 
