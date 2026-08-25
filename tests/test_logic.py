@@ -56,7 +56,7 @@ def test_外気が閾値を超えていれば従来どおり冷房():
     assert d.mode == "cool"
     assert d.power == "on"
     # (外気=涼しい, 室温=暑い) のマトリクス値がそのまま出る
-    assert d.target_temp == 25.0
+    assert d.target_temp == 27.0
     assert d.volume_pref == "min"
 
 
@@ -64,7 +64,7 @@ def test_湿度が高ければ送風にしない():
     d = call(outdoor=23.7, room=27.3, humidity=75)
     assert d.free_cool is False
     assert d.mode == "cool"
-    assert d.target_temp == 25.0
+    assert d.target_temp == 27.0
 
 
 def test_湿度が上限ちょうどなら突入できる():
@@ -83,13 +83,13 @@ def test_無効化していれば常に冷房マトリクスどおり():
     d = call(outdoor=23.7, room=27.3, humidity=53, free_cool_enabled=False)
     assert d.free_cool is False
     assert d.mode == "cool"
-    assert d.target_temp == 25.0
+    assert d.target_temp == 27.0
 
 
 # ---------- 離脱（冷房復帰）とロックアウト ----------
 
 def test_室温が上がりきったら冷房に復帰する():
-    d = call(outdoor=23.7, room=29.5, humidity=53, last_free_cool=True)
+    d = call(outdoor=23.7, room=31.0, humidity=53, last_free_cool=True)
     assert d.free_cool is False
     assert d.mode == "cool"
     assert d.power == "on"
@@ -98,22 +98,90 @@ def test_室温が上がりきったら冷房に復帰する():
 
 
 def test_復帰の閾値ちょうどでも冷房に戻る():
-    d = call(outdoor=23.7, room=29.0, humidity=53, last_free_cool=True)
+    d = call(outdoor=23.7, room=30.5, humidity=53, last_free_cool=True)
     assert d.free_cool is False
     assert d.free_cool_abort is True
 
 
 def test_送風中でなければ復帰フラグは立たない():
-    d = call(outdoor=23.7, room=29.5, humidity=53, last_free_cool=False)
+    d = call(outdoor=23.7, room=31.0, humidity=53, last_free_cool=False)
     assert d.free_cool is False
     assert d.free_cool_abort is False
+    # 復帰しきい値以上の室温では新規に送風へ入らない
+    assert d.mode == "cool"
+
+
+# ---------- 復帰には「上昇」も必要 ----------
+
+def test_室温が高くても横ばいなら送風を続ける():
+    # 30.8℃で送風を始め、30.9℃（上昇0.1）→ まだ送風のまま
+    d = call(outdoor=22.5, room=30.9, humidity=55, last_free_cool=True,
+             free_cool_start_room=30.8)
+    assert d.free_cool is True
+    assert d.mode == "blow"
+    assert d.free_cool_abort is False
+
+
+def test_室温が下がっているなら当然送風を続ける():
+    d = call(outdoor=22.5, room=30.6, humidity=55, last_free_cool=True,
+             free_cool_start_room=31.0)
+    assert d.free_cool is True
+    assert d.free_cool_abort is False
+
+
+def test_開始時より上昇幅を超えて上がれば復帰する():
+    d = call(outdoor=22.5, room=31.3, humidity=55, last_free_cool=True,
+             free_cool_start_room=30.8)
+    assert d.free_cool is False
+    assert d.free_cool_abort is True
+    assert "上昇したため冷房に復帰" in d.reason
+
+
+def test_上昇していてもしきい値未満なら復帰しない():
+    d = call(outdoor=22.5, room=29.0, humidity=55, last_free_cool=True,
+             free_cool_start_room=27.5)
+    assert d.free_cool is True
+    assert d.free_cool_abort is False
+
+
+def test_開始時室温が不明なら絶対値だけで復帰する():
+    d = call(outdoor=22.5, room=30.6, humidity=55, last_free_cool=True,
+             free_cool_start_room=None)
+    assert d.free_cool_abort is True
+
+
+def test_上昇幅は設定で変えられる():
+    d = call(outdoor=22.5, room=31.3, humidity=55, last_free_cool=True,
+             free_cool_start_room=30.8, free_cool_rise_min=1.0)
+    assert d.free_cool is True
+
+
+def test_送風中に外気が暑くなれば復帰フラグなしで冷房に戻る():
+    # 抜けるだけ（ロックアウトは始めない）
+    d = call(outdoor=26.5, room=28.0, humidity=55, last_free_cool=True,
+             free_cool_start_room=27.5)
+    assert d.free_cool is False
+    assert d.free_cool_abort is False
+    assert d.mode == "cool"
+
+
+# ---------- 涼しい×暑いの冷房目標 ----------
+
+def test_涼しい_暑いの目標温度は設定で上書きできる():
+    d = call(outdoor=26.0, room=28.0, humidity=55, cool_out_hot_target=26.0)
+    assert d.target_temp == 26.0
+
+
+def test_目標温度の上書きは他のマスに影響しない():
+    d = call(outdoor=30.0, room=28.0, humidity=55, cool_out_hot_target=26.0)
+    assert d.target_temp == 22.0
 
 
 def test_ロックアウト中は外気が涼しくても冷房のまま():
     d = call(outdoor=23.7, room=27.3, humidity=53, lockout_active=True)
     assert d.free_cool is False
     assert d.mode == "cool"
-    assert d.target_temp == 25.0
+    assert d.target_temp == 27.0
 
 
 def test_ロックアウトが明ければまた送風に入れる():
@@ -163,7 +231,7 @@ def test_温度帯のヒステリシスが壊れていない():
 def test_マトリクスの意味が変わっていない():
     assert logic.MATRIX[(0, 0)] == ("on", 19.0, "auto")
     assert logic.MATRIX[(1, 1)] == ("on", 24.0, "auto")
-    assert logic.MATRIX[(2, 0)] == ("on", 25.0, "min")
+    assert logic.MATRIX[(2, 0)] == ("on", 27.0, "min")
     assert logic.MATRIX[(2, 2)] == ("off", None, None)
 
 
