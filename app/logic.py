@@ -31,7 +31,7 @@ BLOW_MODE = "blow"
 class Decision:
     power: str            # "on" / "off"
     target_temp: float | None
-    volume_pref: str | None   # "auto"(強め) / "min"(弱め)
+    volume_pref: str | None   # "auto"(エアコン任せ) / "max"(最強) / "min"(弱め)
     out_tier: int
     room_tier: int
     reason: str
@@ -78,14 +78,14 @@ def free_cool_out_ok(
 
 # (外気帯, 室温帯) → (電源, 目標温度, 風量)
 MATRIX: dict[tuple[int, int], tuple[str, float | None, str | None]] = {
-    (0, 0): ("on", 19.0, "auto"),   # 猛暑×暑い: 最大パワーで一気に冷やす
+    (0, 0): ("on", 19.0, "max"),    # 猛暑×暑い: ここだけ最強風量で一気に冷やす
     (0, 1): ("on", 23.0, "auto"),
-    (0, 2): ("on", 26.0, "min"),    # 冷えたら維持運転
+    (0, 2): ("on", 26.0, "auto"),
     (1, 0): ("on", 22.0, "auto"),
     (1, 1): ("on", 24.0, "auto"),
-    (1, 2): ("on", 26.0, "min"),
-    (2, 0): ("on", 27.0, "min"),    # 外が涼しければ軽く冷やすだけでよい
-    (2, 1): ("on", 26.0, "min"),
+    (1, 2): ("on", 26.0, "auto"),
+    (2, 0): ("on", 27.0, "auto"),   # 外が涼しくても、まだ暑いなら風量は絞らない
+    (2, 1): ("on", 26.0, "auto"),
     (2, 2): ("off", None, None),    # 外も中も涼しければ停止
 }
 

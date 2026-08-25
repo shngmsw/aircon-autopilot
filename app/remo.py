@@ -151,17 +151,19 @@ def nearest_temp(target: float, options: list[str]) -> str:
 
 
 def pick_volume(pref: str, options: list[str]) -> str:
-    """希望風量('auto'=自動/強め, 'min'=弱め)を機種の対応値から選ぶ。"""
+    """希望風量('auto'=エアコン任せ, 'max'=最強, 'min'=弱め)を機種の対応値から選ぶ。"""
     if not options:
         return ""
+    nums = sorted((o for o in options if o.replace(".", "").isdigit()), key=float)
     if pref == "auto":
         if "auto" in options:
             return "auto"
-        # autoが無ければ数値の最大（最強）
-        nums = sorted((o for o in options if o.replace(".", "").isdigit()), key=float)
+        # autoが無い機種では最強で代用する
+        return nums[-1] if nums else options[-1]
+    if pref == "max":
+        # 一気に冷やしたいときは自動任せにせず最強を指定する
         return nums[-1] if nums else options[-1]
     # 弱め: 数値の最小
-    nums = sorted((o for o in options if o.replace(".", "").isdigit()), key=float)
     return nums[0] if nums else options[0]
 
 

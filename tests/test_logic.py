@@ -57,7 +57,7 @@ def test_外気が閾値を超えていれば従来どおり冷房():
     assert d.power == "on"
     # (外気=涼しい, 室温=暑い) のマトリクス値がそのまま出る
     assert d.target_temp == 27.0
-    assert d.volume_pref == "min"
+    assert d.volume_pref == "auto"
 
 
 def test_湿度が高ければ送風にしない():
@@ -229,17 +229,22 @@ def test_温度帯のヒステリシスが壊れていない():
 
 
 def test_マトリクスの意味が変わっていない():
-    assert logic.MATRIX[(0, 0)] == ("on", 19.0, "auto")
+    assert logic.MATRIX[(0, 0)] == ("on", 19.0, "max")
     assert logic.MATRIX[(1, 1)] == ("on", 24.0, "auto")
-    assert logic.MATRIX[(2, 0)] == ("on", 27.0, "min")
+    assert logic.MATRIX[(2, 0)] == ("on", 27.0, "auto")
     assert logic.MATRIX[(2, 2)] == ("off", None, None)
+
+
+def test_冷房中は風量を絞らない():
+    # 冷房のマトリクスは基本auto。弱めるのは送風(blow)のときだけ。
+    assert all(v != "min" for _, _, v in logic.MATRIX.values())
 
 
 def test_猛暑時は外気冷却モードに入らず従来どおり():
     d = call(outdoor=35.0, room=28.0, humidity=50)
     assert d.free_cool is False
     assert d.mode == "cool"
-    assert (d.power, d.target_temp, d.volume_pref) == ("on", 19.0, "auto")
+    assert (d.power, d.target_temp, d.volume_pref) == ("on", 19.0, "max")
 
 
 def test_理由文字列の基本形式は従来どおり():
