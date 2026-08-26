@@ -38,7 +38,8 @@ LONGITUDE = _f("LONGITUDE", 139.7671)
 APPLIANCE_ID = os.environ.get("APPLIANCE_ID", "")
 
 CONTROL_INTERVAL_MIN = _i("CONTROL_INTERVAL_MIN", 10)   # 制御ループの間隔
-MIN_HOLD_MIN = _i("MIN_HOLD_MIN", 15)                   # 一度操作したら最低これだけ維持
+MIN_HOLD_MIN = _i("MIN_HOLD_MIN", 10)                   # 一度操作したら最低これだけ維持
+                                                        # (CONTROL_INTERVAL_MIN より長いと毎回は調整できない)
 HYSTERESIS = _f("HYSTERESIS", 0.7)                      # 温度帯の切替に必要な余裕(℃)
 ROOM_TEMP_OFFSET = _f("ROOM_TEMP_OFFSET", 0.0)          # Remoセンサー補正(自己発熱なら -1.0 など)
 
@@ -53,7 +54,27 @@ FREE_COOL_LOCKOUT_MIN = _i("FREE_COOL_LOCKOUT_MIN", 45) # 復帰後この時間�
 
 # 外気が涼しい(<28℃)のに室温が暑い(≥27℃)ときの冷房目標温度(℃)。
 # 外が涼しければ軽く冷やすだけでよく、25℃だと全力運転でエアコン近くが寒くなる
+# ROOM_TARGET_ENABLED=true のときは室温追従が優先されるため使われない。
 COOL_OUT_HOT_TARGET = _f("COOL_OUT_HOT_TARGET", 27.0)
+
+# --- 室温追従モード（room target） ---
+# 「設定温度」ではなく「室温そのもの」を目標帯に入れる。設定温度は結果を見て
+# 上下させる。エアコンの設定温度と実際の室温には部屋ごとにずれがあるため、
+# 目標値を決め打ちせず実測から追い込む。
+ROOM_TARGET_ENABLED = _b("ROOM_TARGET_ENABLED", True)
+ROOM_TARGET_LOW = _f("ROOM_TARGET_LOW", 24.0)           # この室温を下回ったら冷房を止める(℃)
+ROOM_TARGET_HIGH = _f("ROOM_TARGET_HIGH", 25.0)         # この室温を上回ったら冷房する(℃)
+# 目標をどれだけ超えているかに対して、設定温度を何倍下げるか。
+# 1.0 なら「3℃オーバーで設定を3℃下げる」。大きいほど速いが行き過ぎやすい
+ROOM_TARGET_GAIN = _f("ROOM_TARGET_GAIN", 1.5)
+ROOM_TARGET_SET_MIN = _f("ROOM_TARGET_SET_MIN", 16.0)   # 設定温度の下限(℃)
+ROOM_TARGET_SET_MAX = _f("ROOM_TARGET_SET_MAX", 30.0)   # 設定温度の上限(℃)
+# 目標帯にどれだけ近づいたら設定温度を動かさないか(℃)。
+# 毎回動かすと制御が振動するので、この幅に入っていれば据え置く
+ROOM_TARGET_DEADBAND = _f("ROOM_TARGET_DEADBAND", 0.3)
+# 目標をこれ以上超えていたら風量を最強にする(℃)。
+# 弱い冷気で長く回すより、能力を出しきって早く目標へ入れる
+ROOM_TARGET_MAX_VOL_OVER = _f("ROOM_TARGET_MAX_VOL_OVER", 1.0)
 
 DB_PATH = os.environ.get("DB_PATH", str(BASE_DIR / "data" / "aircon.db"))
 HOST = os.environ.get("HOST", "0.0.0.0")

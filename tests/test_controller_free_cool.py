@@ -39,6 +39,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "t.db"))
     store._conn = None
     monkeypatch.setattr(config, "MIN_HOLD_MIN", 0)
+    # ここで見たいのは送風の復帰フローなので、目標温度は従来のマトリクスで固定する
+    monkeypatch.setattr(config, "ROOM_TARGET_ENABLED", False)
     monkeypatch.setattr(config, "FREE_COOL_ABORT_ROOM", 30.5)
     monkeypatch.setattr(config, "FREE_COOL_RISE_MIN", 0.5)
     monkeypatch.setattr(config, "FREE_COOL_LOCKOUT_MIN", 45)
@@ -109,3 +111,50 @@ def test_室温が下がっている限り送風を続ける(env):
         run()
         assert store.get_state("free_cool_active") is True
     assert sum(1 for c in calls if c["mode"] == "cool") == 0
+
+
+def test_室温追従では実際の室温を見て設定温度を下げる(env, monkeypatch):
+    """設定温度と室温がずれていても、室温を見て設定を追い込めること。"""
+    from app import config
+
+    monkeypatch.setattr(config, "ROOM_TARGET_ENABLED", True)
+    monkeypatch.setattr(config, "ROOM_TARGET_LOW", 24.0)
+    monkeypatch.setattr(config, "ROOM_TARGET_HIGH", 25.0)
+    monkeypatch.setattr(config, "ROOM_TARGET_GAIN", 1.0)
+    monkeypatch.setattr(config, "FREE_COOL_ENABLED", False)
+    state, calls = env
+
+    # 設定27℃で室温28.0℃。目標を超えているので設定を下げる
+    state["aircon"] = _aircon(True, "cool", temp="27")
+    state["room"] = 28.0
+    state["outdoor"] = 30.0
+    run()
+    assert calls[-1]["mode"] == "cool"
+    # 3.0℃超過 × gain1.0 → 27 から 24℃を狙うが、この機種の下限25℃に丸められる
+    assert calls[-1]["temp"] == "25"
+
+    # 室温が目標帯に入れば、それ以上は下げない
+    # （風量も追従後の auto に合わせておく。ここで見たいのは設定温度）
+    ac = _aircon(True, "cool", temp="25")
+    ac.air_volume = "auto"
+    state["aircon"] = ac
+    state["room"] = 24.5
+    n = len(calls)
+    r = run()
+    assert len(calls) == n              # 追加のAPIコールなし
+    assert "現状維持" in r["note"]
+
+
+def test_室温追従では目標を下回ると停止する(env, monkeypatch):
+    from app import config
+
+    monkeypatch.setattr(config, "ROOM_TARGET_ENABLED", True)
+    monkeypatch.setattr(config, "ROOM_TARGET_LOW", 24.0)
+    monkeypatch.setattr(config, "FREE_COOL_ENABLED", False)
+    state, calls = env
+
+    state["aircon"] = _aircon(True, "cool", temp="25")
+    state["room"] = 23.5
+    state["outdoor"] = 30.0     # 外が暑くても室温が下回れば止める
+    run()
+    assert calls[-1]["power"] == "off"

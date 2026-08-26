@@ -94,6 +94,14 @@ async def run_cycle(client: httpx.AsyncClient) -> dict:
         note = "外気温または室温が取得できず、操作を見送り"
     else:
         lockout_active, _ = free_cool_lockout()
+        # 室温追従は前回の設定温度を起点に上下させる。冷房以外(送風など)の
+        # ときの値は基準にならないので渡さない
+        current_set = None
+        if aircon.power_on and aircon.mode == "cool" and aircon.target_temp:
+            try:
+                current_set = float(aircon.target_temp)
+            except ValueError:
+                pass
         d = logic.decide(
             outdoor,
             room,
@@ -110,6 +118,15 @@ async def run_cycle(client: httpx.AsyncClient) -> dict:
             free_cool_start_room=store.get_state("free_cool_start_room"),
             free_cool_rise_min=config.FREE_COOL_RISE_MIN,
             cool_out_hot_target=config.COOL_OUT_HOT_TARGET,
+            room_target_enabled=config.ROOM_TARGET_ENABLED,
+            room_target_low=config.ROOM_TARGET_LOW,
+            room_target_high=config.ROOM_TARGET_HIGH,
+            room_target_gain=config.ROOM_TARGET_GAIN,
+            room_target_set_min=config.ROOM_TARGET_SET_MIN,
+            room_target_set_max=config.ROOM_TARGET_SET_MAX,
+            room_target_deadband=config.ROOM_TARGET_DEADBAND,
+            room_target_max_vol_over=config.ROOM_TARGET_MAX_VOL_OVER,
+            current_set_temp=current_set,
         )
         store.set_state("last_out_tier", d.out_tier)
         store.set_state("last_room_tier", d.room_tier)
