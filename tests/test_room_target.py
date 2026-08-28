@@ -5,7 +5,7 @@
 """
 from app import logic
 
-LOW, HIGH = 24.0, 25.0
+LOW, HIGH = 24.0, 25.5
 GAIN, SET_MIN, SET_MAX, DEAD = 1.5, 18.0, 30.0, 0.3
 
 
@@ -16,22 +16,22 @@ def setpoint(room, current_set):
 
 
 def test_ずれが大きいほど大きく下げる():
-    # 2.8℃オーバー × gain1.5 = 4.2 → 4℃下げる
+    # 2.3℃オーバー × gain1.5 = 3.45 → 3℃下げる
     power, temp, _ = setpoint(room=27.8, current_set=25.0)
     assert power == "on"
-    assert temp == 21.0
+    assert temp == 22.0
 
 
 def test_ずれが小さければ下げ幅も小さい():
     # 0.5℃オーバー × gain1.5 = 0.75 だが、最低1℃は動かす
-    power, temp, _ = setpoint(room=25.5, current_set=24.0)
+    power, temp, _ = setpoint(room=26.0, current_set=24.0)
     assert (power, temp) == ("on", 23.0)
 
 
 def test_下げても届かなければさらに下げる():
-    # 2.0℃オーバー × gain1.5 = 3 → 24 から 21℃ へ
+    # 1.5℃オーバー × gain1.5 = 2.25 → 24 から 22℃ へ
     power, temp, _ = setpoint(room=27.0, current_set=24.0)
-    assert (power, temp) == ("on", 21.0)
+    assert (power, temp) == ("on", 22.0)
 
 
 def test_設定温度は下限で止まる():
@@ -52,15 +52,21 @@ def test_目標帯の中なら設定を動かさない():
 
 
 def test_上端付近でも設定を動かさない():
-    # 24.8℃ は high(25.0) との差が deadband(0.3) 以内
-    power, temp, _ = setpoint(room=24.8, current_set=22.0)
+    # 25.3℃ は high(25.5) との差が deadband(0.3) 以内
+    power, temp, _ = setpoint(room=25.3, current_set=22.0)
     assert (power, temp) == ("on", 22.0)
+
+
+def test_上限ちょうどなら下げにいかない():
+    # 25.5℃ は目標帯の内側。そこから 25℃ まで追い込む必要はない
+    power, temp, _ = setpoint(room=HIGH, current_set=24.0)
+    assert (power, temp) == ("on", 24.0)
 
 
 def test_設定温度が不明なら目標上限から始める():
-    # 25 を起点に、2.0℃オーバー × gain1.5 = 3℃下げる
+    # 25.5 を起点に、1.5℃オーバー × gain1.5 = 2℃下げる
     power, temp, _ = setpoint(room=27.0, current_set=None)
-    assert (power, temp) == ("on", 22.0)
+    assert (power, temp) == ("on", 23.5)
 
 
 # --- decide への組み込み ---
@@ -82,7 +88,7 @@ def test_目標室温は外気温で変わらない():
     # 同じ室温なら、外が猛暑でも涼しくても同じ設定温度になる
     hot = call(outdoor=35.0, room=27.0, current_set=25.0)
     cool = call(outdoor=20.0, room=27.0, current_set=25.0)
-    assert hot.target_temp == cool.target_temp == 22.0
+    assert hot.target_temp == cool.target_temp == 23.0
 
 
 def test_室温追従では風量を絞らない():
@@ -114,7 +120,7 @@ def test_外気が涼しくても室温が目標を下回れば停止():
 # --- 風量 ---
 
 def test_目標から大きく外れていれば風量を最強にする():
-    # 29.3℃ は目標上限25.0℃を4.3℃超過
+    # 29.3℃ は目標上限25.5℃を3.8℃超過
     d = call(outdoor=33.0, room=29.3, current_set=18.0)
     assert d.volume_pref == "max"
 

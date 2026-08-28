@@ -63,7 +63,7 @@ COOL_OUT_HOT_TARGET = _f("COOL_OUT_HOT_TARGET", 27.0)
 # 目標値を決め打ちせず実測から追い込む。
 ROOM_TARGET_ENABLED = _b("ROOM_TARGET_ENABLED", True)
 ROOM_TARGET_LOW = _f("ROOM_TARGET_LOW", 24.0)           # この室温を下回ったら冷房を止める(℃)
-ROOM_TARGET_HIGH = _f("ROOM_TARGET_HIGH", 25.0)         # この室温を上回ったら冷房する(℃)
+ROOM_TARGET_HIGH = _f("ROOM_TARGET_HIGH", 25.5)         # この室温を上回ったら冷房する(℃)
 # 目標をどれだけ超えているかに対して、設定温度を何倍下げるか。
 # 1.0 なら「3℃オーバーで設定を3℃下げる」。大きいほど速いが行き過ぎやすい
 ROOM_TARGET_GAIN = _f("ROOM_TARGET_GAIN", 1.5)
