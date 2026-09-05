@@ -6,7 +6,7 @@ TestClient を context manager にせず使うことで lifespan（スケジュ�
 import pytest
 from fastapi.testclient import TestClient
 
-from app import config, controller, main, store
+from app import config, controller, main, remo, store
 
 
 @pytest.fixture
@@ -51,3 +51,21 @@ def test_不正な目標帯は422で保存されない(client, low, high):
     res = client.post("/api/settings", json={"low": low, "high": high})
     assert res.status_code == 422
     assert store.get_state("room_target_low") is None
+
+
+def test_判定サイクルが失敗しても保存は成功として返す(client, monkeypatch):
+    async def boom(c):
+        raise RuntimeError("Remo API 障害")
+    monkeypatch.setattr(controller, "run_cycle", boom)
+    res = client.post("/api/settings", json={"low": 20.0, "high": 22.0})
+    assert res.status_code == 200
+    assert store.get_state("room_target_low") == 20.0
+    assert "判定は失敗" in res.json()["cycle"]["note"]
+
+
+def test_statusに目標帯が載る(client, monkeypatch):
+    async def fake_snapshot(c):
+        return remo.Snapshot(room_temp=None, humidity=None, aircon=None)
+    monkeypatch.setattr(remo, "fetch_snapshot", fake_snapshot)
+    rt = client.get("/api/status").json()["room_target"]
+    assert rt == {"enabled": config.ROOM_TARGET_ENABLED, "low": 24.0, "high": 25.5, "source": "env"}

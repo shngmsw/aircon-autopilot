@@ -196,7 +196,13 @@ async def set_settings(body: SettingsBody):
         )
     store.set_state("room_target_low", body.low)
     store.set_state("room_target_high", body.high)
-    cycle = await controller.run_cycle(_client)
+    # 保存は済んでいるので、判定サイクルが失敗しても保存成功として返す。
+    # 次の定期サイクルで新しい帯が反映される
+    try:
+        cycle = await controller.run_cycle(_client)
+    except Exception:
+        log.exception("目標帯の保存後の判定サイクルで予期しないエラー")
+        cycle = {"action": "none", "note": "保存しました（判定は失敗、次の定期実行で反映されます）"}
     low, high, source = controller.effective_target_band()
     return {
         "room_target_low": low,
