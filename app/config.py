@@ -76,6 +76,10 @@ ROOM_TARGET_DEADBAND = _f("ROOM_TARGET_DEADBAND", 0.3)
 # 弱い冷気で長く回すより、能力を出しきって早く目標へ入れる
 ROOM_TARGET_MAX_VOL_OVER = _f("ROOM_TARGET_MAX_VOL_OVER", 1.0)
 
+# 室温が目標帯を下回ったときに暖房するのは、外気温がこの値より低いときだけ(℃)。
+# 夏の朝など「たまたま室温が帯を下回った」だけで暖房しないためのガード
+HEAT_OUT_MAX = _f("HEAT_OUT_MAX", 20.0)
+
 DB_PATH = os.environ.get("DB_PATH", str(BASE_DIR / "data" / "aircon.db"))
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = _i("PORT", 8000)

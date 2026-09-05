@@ -37,6 +37,27 @@ def free_cool_lockout() -> tuple[bool, datetime | None]:
     return store.now_jst() < until, until
 
 
+def effective_target_band() -> tuple[float, float, str]:
+    """有効な目標室温の帯 (low, high, 出所) を返す。
+
+    Web UI から保存したオーバーライド（SQLite の state）があればそれを、
+    なければ .env の値を使う。出所は "override" / "env"。
+    state が壊れている（型が違う・上下が逆）ときは .env にフォールバックする。
+    """
+    low = store.get_state("room_target_low")
+    high = store.get_state("room_target_high")
+    try:
+        if isinstance(low, bool) or isinstance(high, bool):
+            raise TypeError("bool は温度として扱わない")
+        low, high = float(low), float(high)
+    except (TypeError, ValueError):
+        return config.ROOM_TARGET_LOW, config.ROOM_TARGET_HIGH, "env"
+    if low >= high:
+        # 上下が逆・同値の帯は制御不能なので使わない
+        return config.ROOM_TARGET_LOW, config.ROOM_TARGET_HIGH, "env"
+    return low, high, "override"
+
+
 async def run_cycle(client: httpx.AsyncClient) -> dict:
     """1回分の制御サイクルを実行し、結果の概要を返す。"""
     snap = await remo.fetch_snapshot(client)
@@ -94,10 +115,12 @@ async def run_cycle(client: httpx.AsyncClient) -> dict:
         note = "外気温または室温が取得できず、操作を見送り"
     else:
         lockout_active, _ = free_cool_lockout()
-        # 室温追従は前回の設定温度を起点に上下させる。冷房以外(送風など)の
+        rt_low, rt_high, _ = effective_target_band()
+        # 室温追従は前回の設定温度を起点に上下させる。冷房・暖房以外(送風など)の
         # ときの値は基準にならないので渡さない
         current_set = None
-        if aircon.power_on and aircon.mode == "cool" and aircon.target_temp:
+        heating_now = aircon.power_on and aircon.mode == logic.WARM_MODE
+        if aircon.power_on and aircon.mode in ("cool", logic.WARM_MODE) and aircon.target_temp:
             try:
                 current_set = float(aircon.target_temp)
             except ValueError:
@@ -119,14 +142,16 @@ async def run_cycle(client: httpx.AsyncClient) -> dict:
             free_cool_rise_min=config.FREE_COOL_RISE_MIN,
             cool_out_hot_target=config.COOL_OUT_HOT_TARGET,
             room_target_enabled=config.ROOM_TARGET_ENABLED,
-            room_target_low=config.ROOM_TARGET_LOW,
-            room_target_high=config.ROOM_TARGET_HIGH,
+            room_target_low=rt_low,
+            room_target_high=rt_high,
             room_target_gain=config.ROOM_TARGET_GAIN,
             room_target_set_min=config.ROOM_TARGET_SET_MIN,
             room_target_set_max=config.ROOM_TARGET_SET_MAX,
             room_target_deadband=config.ROOM_TARGET_DEADBAND,
             room_target_max_vol_over=config.ROOM_TARGET_MAX_VOL_OVER,
             current_set_temp=current_set,
+            heat_out_max=config.HEAT_OUT_MAX,
+            heating_now=heating_now,
         )
         store.set_state("last_out_tier", d.out_tier)
         store.set_state("last_room_tier", d.room_tier)
@@ -146,20 +171,24 @@ async def run_cycle(client: httpx.AsyncClient) -> dict:
 
         want_power = d.power
         want_mode = d.mode
-        blow_unsupported = False
-        if want_power == "on" and want_mode == logic.BLOW_MODE and not remo.supports_mode(
-            aircon, logic.BLOW_MODE
+        unsupported_mode = None
+        if (
+            want_power == "on"
+            and want_mode in (logic.BLOW_MODE, logic.WARM_MODE)
+            and not remo.supports_mode(aircon, want_mode)
         ):
-            # 送風非対応の機種では電源オフにフォールバックする
+            # 非対応モードの機種では電源オフにフォールバックする
+            unsupported_mode = want_mode
             want_power, want_mode = "off", None
-            blow_unsupported = True
 
-        # 目標を「そのモードで」機種が受け付ける値に丸める
+        # 目標を「そのモードで」機種が受け付ける値に丸める。
+        # 温度一覧が無いモード（送風や、暖房の温度指定を持たない機種）では
+        # apply_settings が temperature を送らないので、比較対象にもしない
         temp_opts = remo.mode_temp_options(aircon, want_mode) if want_mode else []
         vol_opts = remo.mode_vol_options(aircon, want_mode) if want_mode else []
         want_temp = (
             remo.nearest_temp(d.target_temp, temp_opts)
-            if d.target_temp is not None else None
+            if d.target_temp is not None and temp_opts else None
         )
         want_vol = remo.pick_volume(d.volume_pref, vol_opts) if d.volume_pref else None
 
@@ -197,13 +226,17 @@ async def run_cycle(client: httpx.AsyncClient) -> dict:
                 store.set_state("expected_power", want_power)
                 action = "set"
                 if want_power == "off":
+                    labels = {logic.BLOW_MODE: "送風", logic.WARM_MODE: "暖房"}
                     note = f"{note_prefix}{reason}" + (
-                        "・送風非対応のため電源オフ" if blow_unsupported else " → 電源オフ"
+                        f"・{labels[unsupported_mode]}非対応のため電源オフ"
+                        if unsupported_mode else " → 電源オフ"
                     )
                 elif want_mode == logic.BLOW_MODE:
                     note = f"{note_prefix}{reason}・送風に切替" + (
                         f"（風量{want_vol}）" if want_vol else ""
                     )
+                elif want_temp is None:
+                    note = f"{note_prefix}{reason} → 風量{want_vol}"
                 else:
                     note = f"{note_prefix}{reason} → {want_temp}℃ / 風量{want_vol}"
                 # 記録には送信後の値を残す
