@@ -73,7 +73,7 @@ controller は毎サイクル、次の順で有効値を決める。
 - 暖房オン: `room < low`
 - 暖房オフ: `room ≥ min(low + HYSTERESIS, high)`（既定 0.7℃。帯に少し入ってから切る。帯の幅がヒステリシスより狭い場合でも、上端を超えて暖房を続けて冷房判定に飛び込まないよう high で頭打ちにする）
 
-前回暖房中だったかは state（例: `heating_active`）で持ち、controller から decide に渡す。
+前回暖房中だったかは、実機の運転状態（電源オンかつ運転モードが warm）から controller が判定して decide に渡す。専用の state キーは持たない（実機の状態が唯一の情報源になり、外部操作とのずれも起きない）。
 
 ### 誤暖房ガード（外気温）
 
@@ -114,7 +114,7 @@ controller は毎サイクル、次の順で有効値を決める。
 | ファイル | 変更 |
 |---|---|
 | `app/logic.py` | `room_target_setpoint` の暖房対応、`decide` の暖房分岐と free-cool 適用条件 |
-| `app/controller.py` | 目標帯の解決ヘルパー、warm 対応（current_set・フォールバック）、`heating_active` の保存 |
+| `app/controller.py` | 目標帯の解決ヘルパー、warm 対応（current_set・暖房中判定・フォールバック） |
 | `app/main.py` | `GET/POST /api/settings` |
 | `app/config.py` | `HEAT_OUT_MAX` 追加 |
 | `app/static/index.html` | 目標帯の設定 UI |
