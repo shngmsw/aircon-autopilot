@@ -259,7 +259,10 @@ def decide(
         if power != "on":
             vol = None
         elif rt_mode == WARM_MODE:
-            vol = "max" if room_target_low - room >= room_target_max_vol_over else "auto"
+            vol = (
+                "max" if room_target_low - room >= room_target_max_vol_over
+                else "auto"
+            )
         elif room - room_target_high >= room_target_max_vol_over:
             vol = "max"
         else:
@@ -267,7 +270,7 @@ def decide(
         reason = f"外気{outdoor:.1f}℃ / {reason}"
     else:
         power, temp, vol = MATRIX[(out_tier, room_tier)]
-        rt_mode = "cool"
+        rt_mode = "cool"   # マトリクスは冷房専用（mode の分岐を1本にまとめるため）
         if cool_out_hot_target is not None and (out_tier, room_tier) == (2, 0):
             temp = cool_out_hot_target
         reason = (
@@ -296,7 +299,10 @@ def decide(
             # 室温が上がり続けているので冷房へ復帰。以後しばらくは再突入しない
             free_cool_abort = True
             reason += f" → 室温{room:.1f}℃まで上昇したため冷房に復帰"
-        elif power == "on" and mode == "cool" and out_ok and humid_ok and room_ok and not lockout_active:
+        elif (
+            power == "on" and mode == "cool"
+            and out_ok and humid_ok and room_ok and not lockout_active
+        ):
             # 室温追従では「目標帯を下回ったか」で判断する（そのときは power が
             # すでに off なのでここには来ない）。帯の中なら送風で維持を狙う
             cool_enough = (

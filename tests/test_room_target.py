@@ -231,6 +231,11 @@ def test_暖房判定では外気冷却モードに入らない():
     assert (d.power, d.mode) == ("on", "warm")
     assert d.free_cool is False
 
+    # 帯の下端で暖房継続中も同じ（送風で上書きしない）
+    d = call(outdoor=15.0, room=24.3, current_set=26.0,
+             heating_now=True, free_cool_enabled=True, humidity=50)
+    assert (d.power, d.mode, d.free_cool) == ("on", "warm", False)
+
 
 def test_decideでも暖房は帯に少し入ってから切る():
     d = call(outdoor=10.0, room=24.3, current_set=26.0, heating_now=True)
@@ -242,4 +247,9 @@ def test_decideでも暖房は帯に少し入ってから切る():
 
 def test_冬に帯内で停止中なら停止のまま():
     d = call(outdoor=10.0, room=24.5)
+    assert d.power == "off"
+
+
+def test_外気が上限ちょうどなら暖房しない():
+    d = call(outdoor=20.0, room=22.0, heat_out_max=20.0)
     assert d.power == "off"
