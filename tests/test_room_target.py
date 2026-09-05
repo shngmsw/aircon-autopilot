@@ -88,6 +88,15 @@ def test_暖房を許可しなければ従来どおり停止する():
     assert (power, temp, mode) == ("off", None, None)
 
 
+def test_暖房中に上端を超えたら一旦停止する():
+    # 冬の日射などで急上昇。冷房に直行せず一旦オフ（次回判定で冷房を検討）
+    power, temp, reason, mode = setpoint4(
+        room=27.0, current_set=26.0, heat_allowed=True, heating_now=True
+    )
+    assert (power, temp, mode) == ("off", None, None)
+    assert "超えたので暖房を停止" in reason
+
+
 def test_暖房の設定温度は上限で止まる():
     power, temp, _, mode = setpoint4(
         room=18.0, current_set=29.0, heat_allowed=True, heating_now=True

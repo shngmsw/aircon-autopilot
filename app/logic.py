@@ -117,12 +117,17 @@ def room_target_setpoint(
     if heating_now and room >= heat_off:
         # 暖房中に帯へ入った（room > high の場合を含む）。ここで暖房終了。
         # 冷房が要るかどうかは次回の呼び出しで room > high から改めて判断する
+        if room > high:
+            return "off", None, (
+                f"室温{room:.1f}℃が目標{high:.1f}℃を超えたので暖房を停止"
+            ), None
         return "off", None, (
             f"室温{room:.1f}℃が目標帯({low:.1f}〜{high:.1f}℃)に入ったので暖房を停止"
         ), None
 
     if room > high:
         # まだ暑い。冷房で下げる。暖房中だった場合の設定温度は基準にならない
+        # （heating_now は先頭の早期リターンで到達しないが、順序変更への保険として残す）
         base = current_set if (current_set is not None and not heating_now) else high
         over = room - high
         drop = max(1.0, round(over * gain))
