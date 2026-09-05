@@ -203,3 +203,43 @@ def test_目標帯に近づいたら風量をautoに戻す():
 def test_目標帯の中なら風量はauto():
     d = call(outdoor=33.0, room=24.5, current_set=20.0)
     assert d.volume_pref == "auto"
+
+
+# --- decide の暖房 ---
+
+def test_decideで外気が冷たく目標を下回れば暖房する():
+    d = call(outdoor=10.0, room=22.0)
+    # 2.0℃不足 × gain1.5 = 3 → 24+3=27℃。不足2.0 ≥ 1.0 なので風量max
+    assert (d.power, d.mode, d.target_temp, d.volume_pref) == ("on", "warm", 27.0, "max")
+
+
+def test_不足が小さければ暖房の風量はauto():
+    # 0.5℃不足 × gain1.5 = 0.75 → 最低1℃動かして 25℃。不足0.5 < 1.0 なので auto
+    d = call(outdoor=10.0, room=23.5)
+    assert (d.power, d.mode, d.target_temp, d.volume_pref) == ("on", "warm", 25.0, "auto")
+
+
+def test_外気が暖かければ暖房せず停止する():
+    # 外気25℃ ≥ HEAT_OUT_MAX(既定20℃) → 夏の朝の誤暖房ガード
+    d = call(outdoor=25.0, room=22.0)
+    assert d.power == "off"
+
+
+def test_暖房判定では外気冷却モードに入らない():
+    # 外気15℃は free_cool_out_max(25)以下だが、暖房を送風で上書きしない
+    d = call(outdoor=15.0, room=22.0, free_cool_enabled=True, humidity=50)
+    assert (d.power, d.mode) == ("on", "warm")
+    assert d.free_cool is False
+
+
+def test_decideでも暖房は帯に少し入ってから切る():
+    d = call(outdoor=10.0, room=24.3, current_set=26.0, heating_now=True)
+    assert (d.power, d.mode, d.target_temp) == ("on", "warm", 26.0)
+
+    d = call(outdoor=10.0, room=24.8, current_set=26.0, heating_now=True)
+    assert d.power == "off"
+
+
+def test_冬に帯内で停止中なら停止のまま():
+    d = call(outdoor=10.0, room=24.5)
+    assert d.power == "off"

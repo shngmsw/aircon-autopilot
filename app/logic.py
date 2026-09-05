@@ -216,6 +216,8 @@ def decide(
     room_target_deadband: float = 0.3,
     room_target_max_vol_over: float = 1.0,
     current_set_temp: float | None = None,
+    heat_out_max: float = 20.0,
+    heating_now: bool = False,
 ) -> Decision:
     """外気温・室温・湿度から運転内容を決める（純粋関数）。
 
@@ -233,22 +235,31 @@ def decide(
     room_target_enabled=True のときはマトリクスを使わず、室温そのものを
     room_target_low〜high に入れるよう設定温度を上下させる（室温追従モード）。
     目標室温は外気で変えない。外気は「冷房か送風か」の判断にだけ使う。
+
+    室温が room_target_low を下回り、かつ外気温が heat_out_max より低ければ
+    暖房(warm)する。heating_now は「いま暖房で運転中か」で、暖房オフの
+    ヒステリシス判定に使う。暖房は室温追従モード限定（マトリクスは冷房専用）。
     """
     out_tier = tier_with_hysteresis(outdoor, OUT_THRESHOLDS, last_out_tier, hyst)
     room_tier = tier_with_hysteresis(room, ROOM_THRESHOLDS, last_room_tier, hyst)
 
     if room_target_enabled:
         # 室温そのものを目標帯に入れる。設定温度は結果を見て上下させるので、
-        # 外気帯は「冷房か送風か」の判断にだけ使う（目標室温は外気で変えない）
-        power, temp, reason, _rt_mode = room_target_setpoint(
+        # 外気は「冷房か送風か」「暖房してよいか」の判断にだけ使う
+        power, temp, reason, rt_mode = room_target_setpoint(
             room, current_set_temp, room_target_low, room_target_high,
             room_target_gain, room_target_set_min, room_target_set_max,
             room_target_deadband,
+            heat_allowed=outdoor < heat_out_max,
+            heating_now=heating_now,
+            hyst=hyst,
         )
         # 目標から大きく外れている間は能力を出しきる。
         # 目標帯に近づいたら auto に戻して静かにする
         if power != "on":
             vol = None
+        elif rt_mode == WARM_MODE:
+            vol = "max" if room_target_low - room >= room_target_max_vol_over else "auto"
         elif room - room_target_high >= room_target_max_vol_over:
             vol = "max"
         else:
@@ -256,13 +267,14 @@ def decide(
         reason = f"外気{outdoor:.1f}℃ / {reason}"
     else:
         power, temp, vol = MATRIX[(out_tier, room_tier)]
+        rt_mode = "cool"
         if cool_out_hot_target is not None and (out_tier, room_tier) == (2, 0):
             temp = cool_out_hot_target
         reason = (
             f"外気{OUT_LABELS[out_tier]}({outdoor:.1f}℃)"
             f" × 室内{ROOM_LABELS[room_tier]}({room:.1f}℃)"
         )
-    mode = "cool" if power == "on" else None
+    mode = rt_mode if power == "on" else None
 
     free_cool = False
     free_cool_abort = False
@@ -284,7 +296,7 @@ def decide(
             # 室温が上がり続けているので冷房へ復帰。以後しばらくは再突入しない
             free_cool_abort = True
             reason += f" → 室温{room:.1f}℃まで上昇したため冷房に復帰"
-        elif power == "on" and out_ok and humid_ok and room_ok and not lockout_active:
+        elif power == "on" and mode == "cool" and out_ok and humid_ok and room_ok and not lockout_active:
             # 室温追従では「目標帯を下回ったか」で判断する（そのときは power が
             # すでに off なのでここには来ない）。帯の中なら送風で維持を狙う
             cool_enough = (
