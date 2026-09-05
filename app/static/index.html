@@ -185,9 +185,9 @@
     <div class="ctrl">
       <div class="label">設定温度</div>
       <div class="stepper">
-        <button class="step" id="tempDown">−</button>
+        <button class="step" id="tempDown" aria-label="設定温度を下げる">−</button>
         <div class="val mono" id="tempVal">--℃</div>
-        <button class="step" id="tempUp">＋</button>
+        <button class="step" id="tempUp" aria-label="設定温度を上げる">＋</button>
       </div>
     </div>
     <div class="ctrl">
@@ -207,23 +207,23 @@
 <section class="card">
   <div class="panel-head">
     <h2>目標室温</h2>
-    <span class="chip" id="targetSource" style="display:none">.env の既定値</span>
+    <span class="chip" id="targetSource" style="display:none">--</span>
   </div>
   <div class="ctrl-grid">
     <div class="ctrl">
       <div class="label">下限（下回ると暖房）</div>
       <div class="stepper">
-        <button class="step" id="lowDown">−</button>
+        <button class="step" id="lowDown" aria-label="下限を0.5℃下げる">−</button>
         <div class="val mono" id="lowVal">--℃</div>
-        <button class="step" id="lowUp">＋</button>
+        <button class="step" id="lowUp" aria-label="下限を0.5℃上げる">＋</button>
       </div>
     </div>
     <div class="ctrl">
       <div class="label">上限（上回ると冷房）</div>
       <div class="stepper">
-        <button class="step" id="highDown">−</button>
+        <button class="step" id="highDown" aria-label="上限を0.5℃下げる">−</button>
         <div class="val mono" id="highVal">--℃</div>
-        <button class="step" id="highUp">＋</button>
+        <button class="step" id="highUp" aria-label="上限を0.5℃上げる">＋</button>
       </div>
     </div>
   </div>
@@ -371,7 +371,13 @@ function renderStatus() {
       targetBand = { low: rt.low, high: rt.high };
       renderTarget();
     }
-    $("targetSource").style.display = rt.source === "env" ? "" : "none";
+    // マトリクス方式（ROOM_TARGET_ENABLED=false）のときは目標帯が使われないので操作不可にする
+    for (const id of ["lowDown", "lowUp", "highDown", "highUp", "saveTargetBtn"]) {
+      $(id).disabled = !rt.enabled;
+    }
+    const src = $("targetSource");
+    src.style.display = "";
+    src.textContent = rt.source === "env" ? "未設定（.env の既定値）" : "この画面で設定済み";
   }
 }
 
@@ -383,7 +389,8 @@ function renderTarget() {
 
 function stepTarget(key, delta) {
   if (!targetBand) return;
-  let v = Math.round((targetBand[key] + delta) * 2) / 2;   // 0.5刻み
+  const cur = Math.round(targetBand[key] * 2) / 2;   // .env が0.5刻みでない場合の防御
+  let v = cur + delta;
   v = Math.min(30, Math.max(16, v));
   // 帯の幅は最低0.5℃を保つ（サーバー側の検証と同じ）
   if (key === "low") v = Math.min(v, targetBand.high - 0.5);
@@ -409,7 +416,7 @@ $("saveTargetBtn").addEventListener("click", async () => {
       return toast(j.detail || "保存に失敗しました");
     }
     const j = await res.json();
-    toast(`目標 ${j.room_target_low}〜${j.room_target_high}℃ を保存しました`);
+    toast(`目標 ${Number(j.room_target_low).toFixed(1)}〜${Number(j.room_target_high).toFixed(1)}℃ を保存しました`);
     await loadStatus();
     await loadHistory();
   } finally {
