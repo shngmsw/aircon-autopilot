@@ -72,12 +72,18 @@ class AirconBody(BaseModel):
     mode: str | None = None         # "cool"(既定) / "blow" など
 
 
+class SettingsBody(BaseModel):
+    low: float
+    high: float
+
+
 @app.get("/api/status")
 async def status():
     snap = await remo.fetch_snapshot(_client)
     latest = store.latest_reading()
     aircon = snap.aircon
     lockout_active, lockout_until = controller.free_cool_lockout()
+    rt_low, rt_high, rt_source = controller.effective_target_band()
     return {
         "now": store.now_jst().isoformat(timespec="seconds"),
         "auto": store.auto_enabled(),
@@ -103,6 +109,12 @@ async def status():
                 lockout_until.isoformat(timespec="seconds")
                 if lockout_active and lockout_until else None
             ),
+        },
+        "room_target": {
+            "enabled": config.ROOM_TARGET_ENABLED,
+            "low": rt_low,
+            "high": rt_high,
+            "source": rt_source,
         },
         "last_note": latest["note"] if latest else "",
         "interval_min": config.CONTROL_INTERVAL_MIN,
@@ -167,6 +179,31 @@ async def manual_control(body: AirconBody):
         mode=mode if body.power == "on" else None,
     )
     return {"ok": True, "auto": False, "auto_paused": was_auto}
+
+
+@app.get("/api/settings")
+async def get_settings():
+    low, high, source = controller.effective_target_band()
+    return {"room_target_low": low, "room_target_high": high, "source": source}
+
+
+@app.post("/api/settings")
+async def set_settings(body: SettingsBody):
+    """目標室温の帯を保存し、すぐ判定サイクルを回して反映する。"""
+    if not (16.0 <= body.low and body.high <= 30.0 and body.low + 0.5 <= body.high):
+        raise HTTPException(
+            422, "目標帯は 16〜30℃ の範囲で、下限+0.5℃ ≦ 上限 にしてください"
+        )
+    store.set_state("room_target_low", body.low)
+    store.set_state("room_target_high", body.high)
+    cycle = await controller.run_cycle(_client)
+    low, high, source = controller.effective_target_band()
+    return {
+        "room_target_low": low,
+        "room_target_high": high,
+        "source": source,
+        "cycle": cycle,
+    }
 
 
 @app.post("/api/run-now")
