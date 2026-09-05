@@ -41,6 +41,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "MIN_HOLD_MIN", 0)
     # ここで見たいのは送風の復帰フローなので、目標温度は従来のマトリクスで固定する
     monkeypatch.setattr(config, "ROOM_TARGET_ENABLED", False)
+    # .env の値に依存しないよう明示する（ローカルで無効化していてもテストは送風を見る）
+    monkeypatch.setattr(config, "FREE_COOL_ENABLED", True)
     monkeypatch.setattr(config, "FREE_COOL_ABORT_ROOM", 30.5)
     monkeypatch.setattr(config, "FREE_COOL_RISE_MIN", 0.5)
     monkeypatch.setattr(config, "FREE_COOL_LOCKOUT_MIN", 45)
