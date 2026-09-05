@@ -203,6 +203,35 @@
   <div class="manual-lock" id="manualHint"></div>
 </section>
 
+<!-- 目標室温 -->
+<section class="card">
+  <div class="panel-head">
+    <h2>目標室温</h2>
+    <span class="chip" id="targetSource" style="display:none">.env の既定値</span>
+  </div>
+  <div class="ctrl-grid">
+    <div class="ctrl">
+      <div class="label">下限（下回ると暖房）</div>
+      <div class="stepper">
+        <button class="step" id="lowDown">−</button>
+        <div class="val mono" id="lowVal">--℃</div>
+        <button class="step" id="lowUp">＋</button>
+      </div>
+    </div>
+    <div class="ctrl">
+      <div class="label">上限（上回ると冷房）</div>
+      <div class="stepper">
+        <button class="step" id="highDown">−</button>
+        <div class="val mono" id="highVal">--℃</div>
+        <button class="step" id="highUp">＋</button>
+      </div>
+    </div>
+  </div>
+  <div class="btn-row">
+    <button class="primary" id="saveTargetBtn">目標を保存して今すぐ判定</button>
+  </div>
+</section>
+
 <!-- 記録グラフ -->
 <section class="card">
   <div class="panel-head">
@@ -230,6 +259,7 @@ let tempIdx = null;       // 温度候補の現在インデックス
 let rangeHours = 24;
 let chart = null;
 let histRows = [];        // グラフ表示中の履歴行（powerBands・ツールチップが参照）
+let targetBand = null;    // 目標室温カードの編集中の値 {low, high}
 
 function toast(msg) {
   const t = $("toast");
@@ -258,7 +288,7 @@ function renderStatus() {
       ? `${ac.nickname} 停止中`
       : blowing
         ? `${ac.nickname} 送風`
-        : `${ac.nickname} 冷房 ${ac.target_temp}℃`;
+        : `${ac.nickname} ${ac.mode === "warm" ? "暖房" : "冷房"} ${ac.target_temp}℃`;
     powerChip.className = "chip" + (ac.power_on ? " heat" : "");
     // 温度ブリッジのノッチ位置（15〜40℃スケール）。送風中は設定温度が無いので隠す
     const t = parseFloat(ac.target_temp);
@@ -333,7 +363,59 @@ function renderStatus() {
   if (ac && ac.air_volume && sel.value !== ac.air_volume) {
     sel.value = ac.air_volume;
   }
+
+  // 目標室温カード（未編集のときだけサーバー値で初期化する）
+  const rt = state.room_target;
+  if (rt) {
+    if (targetBand === null) {
+      targetBand = { low: rt.low, high: rt.high };
+      renderTarget();
+    }
+    $("targetSource").style.display = rt.source === "env" ? "" : "none";
+  }
 }
+
+function renderTarget() {
+  if (!targetBand) return;
+  $("lowVal").textContent = targetBand.low.toFixed(1) + "℃";
+  $("highVal").textContent = targetBand.high.toFixed(1) + "℃";
+}
+
+function stepTarget(key, delta) {
+  if (!targetBand) return;
+  let v = Math.round((targetBand[key] + delta) * 2) / 2;   // 0.5刻み
+  v = Math.min(30, Math.max(16, v));
+  // 帯の幅は最低0.5℃を保つ（サーバー側の検証と同じ）
+  if (key === "low") v = Math.min(v, targetBand.high - 0.5);
+  else v = Math.max(v, targetBand.low + 0.5);
+  targetBand[key] = v;
+  renderTarget();
+}
+$("lowDown").addEventListener("click", () => stepTarget("low", -0.5));
+$("lowUp").addEventListener("click", () => stepTarget("low", +0.5));
+$("highDown").addEventListener("click", () => stepTarget("high", -0.5));
+$("highUp").addEventListener("click", () => stepTarget("high", +0.5));
+
+$("saveTargetBtn").addEventListener("click", async () => {
+  if (!targetBand) return;
+  $("saveTargetBtn").disabled = true;
+  try {
+    const res = await fetch("/api/settings", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(targetBand),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      return toast(j.detail || "保存に失敗しました");
+    }
+    const j = await res.json();
+    toast(`目標 ${j.room_target_low}〜${j.room_target_high}℃ を保存しました`);
+    await loadStatus();
+    await loadHistory();
+  } finally {
+    $("saveTargetBtn").disabled = false;
+  }
+});
 
 async function loadStatus() {
   try {
@@ -410,7 +492,9 @@ async function loadHistory() {
         afterBody: (items) => {
           const r = items.length ? histRows[items[0].dataIndex] : null;
           if (!r) return "";
-          const label = r.power !== "on" ? "OFF" : (r.mode === "blow" ? "送風" : "冷房");
+          const label = r.power !== "on" ? "OFF"
+            : r.mode === "blow" ? "送風"
+            : r.mode === "warm" ? "暖房" : "冷房";
           return `運転: ${label}`;
         },
       } },
