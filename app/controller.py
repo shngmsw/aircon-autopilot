@@ -42,12 +42,20 @@ def effective_target_band() -> tuple[float, float, str]:
 
     Web UI から保存したオーバーライド（SQLite の state）があればそれを、
     なければ .env の値を使う。出所は "override" / "env"。
+    state が壊れている（型が違う・上下が逆）ときは .env にフォールバックする。
     """
     low = store.get_state("room_target_low")
     high = store.get_state("room_target_high")
-    if low is not None and high is not None:
-        return float(low), float(high), "override"
-    return config.ROOM_TARGET_LOW, config.ROOM_TARGET_HIGH, "env"
+    try:
+        if isinstance(low, bool) or isinstance(high, bool):
+            raise TypeError("bool は温度として扱わない")
+        low, high = float(low), float(high)
+    except (TypeError, ValueError):
+        return config.ROOM_TARGET_LOW, config.ROOM_TARGET_HIGH, "env"
+    if low >= high:
+        # 上下が逆・同値の帯は制御不能なので使わない
+        return config.ROOM_TARGET_LOW, config.ROOM_TARGET_HIGH, "env"
+    return low, high, "override"
 
 
 async def run_cycle(client: httpx.AsyncClient) -> dict:
@@ -173,12 +181,14 @@ async def run_cycle(client: httpx.AsyncClient) -> dict:
             unsupported_mode = want_mode
             want_power, want_mode = "off", None
 
-        # 目標を「そのモードで」機種が受け付ける値に丸める
+        # 目標を「そのモードで」機種が受け付ける値に丸める。
+        # 温度一覧が無いモード（送風や、暖房の温度指定を持たない機種）では
+        # apply_settings が temperature を送らないので、比較対象にもしない
         temp_opts = remo.mode_temp_options(aircon, want_mode) if want_mode else []
         vol_opts = remo.mode_vol_options(aircon, want_mode) if want_mode else []
         want_temp = (
             remo.nearest_temp(d.target_temp, temp_opts)
-            if d.target_temp is not None else None
+            if d.target_temp is not None and temp_opts else None
         )
         want_vol = remo.pick_volume(d.volume_pref, vol_opts) if d.volume_pref else None
 
@@ -225,6 +235,8 @@ async def run_cycle(client: httpx.AsyncClient) -> dict:
                     note = f"{note_prefix}{reason}・送風に切替" + (
                         f"（風量{want_vol}）" if want_vol else ""
                     )
+                elif want_temp is None:
+                    note = f"{note_prefix}{reason} → 風量{want_vol}"
                 else:
                     note = f"{note_prefix}{reason} → {want_temp}℃ / 風量{want_vol}"
                 # 記録には送信後の値を残す

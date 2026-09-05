@@ -82,6 +82,18 @@ def test_目標帯はオーバーライドが無ければenvの値(env):
     assert (low, high, source) == (20.0, 22.0, "env")
 
 
+def test_目標帯が壊れていればenvにフォールバックする(env):
+    store.set_state("room_target_low", "abc")
+    store.set_state("room_target_high", 25.5)
+    assert controller.effective_target_band() == (20.0, 22.0, "env")
+
+
+def test_目標帯の上下が逆ならenvにフォールバックする(env):
+    store.set_state("room_target_low", 26.0)
+    store.set_state("room_target_high", 22.0)
+    assert controller.effective_target_band() == (20.0, 22.0, "env")
+
+
 def test_目標帯はstateのオーバーライドが優先される(env):
     state, calls = env
     # env相当は20〜22℃。オーバーライドで24〜25.5℃に上げると室温23℃でも暖房する
@@ -138,3 +150,17 @@ def test_暖房非対応の機種では電源オフにする(env):
     r = run()
     assert calls[-1]["power"] == "off"
     assert "暖房非対応" in r["note"]
+
+
+def test_暖房の温度指定が無い機種では温度を送らず現状維持できる(env):
+    state, calls = env
+    ac = _aircon(True, "warm", temp="")
+    ac.mode_options["warm"] = {"temp": [], "vol": ["1", "2", "auto"]}
+    ac.air_volume = "auto"
+    state["aircon"] = ac
+    state["room"] = 18.0
+    run()
+    n = len(calls)
+    r = run()   # 2サイクル目: 実機状態は変わらないが、温度を比較対象にしないので現状維持
+    assert len(calls) == n
+    assert "現状維持" in r["note"]
