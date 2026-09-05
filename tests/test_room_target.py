@@ -12,7 +12,7 @@ GAIN, SET_MIN, SET_MAX, DEAD = 1.5, 18.0, 30.0, 0.3
 def setpoint(room, current_set):
     return logic.room_target_setpoint(
         room, current_set, LOW, HIGH, GAIN, SET_MIN, SET_MAX, DEAD
-    )
+    )[:3]
 
 
 def test_ずれが大きいほど大きく下げる():
@@ -67,6 +67,66 @@ def test_設定温度が不明なら目標上限から始める():
     # 25.5 を起点に、1.5℃オーバー × gain1.5 = 2℃下げる
     power, temp, _ = setpoint(room=27.0, current_set=None)
     assert (power, temp) == ("on", 23.5)
+
+
+def setpoint4(room, current_set, **kw):
+    return logic.room_target_setpoint(
+        room, current_set, LOW, HIGH, GAIN, SET_MIN, SET_MAX, DEAD, **kw
+    )
+
+
+# --- 暖房 ---
+
+def test_外気が冷たく目標を下回れば暖房する():
+    # 2.0℃不足 × gain1.5 = 3 → low(24) + 3 = 27℃
+    power, temp, _, mode = setpoint4(room=22.0, current_set=None, heat_allowed=True)
+    assert (power, temp, mode) == ("on", 27.0, "warm")
+
+
+def test_暖房を許可しなければ従来どおり停止する():
+    power, temp, _, mode = setpoint4(room=22.0, current_set=None, heat_allowed=False)
+    assert (power, temp, mode) == ("off", None, None)
+
+
+def test_暖房の設定温度は上限で止まる():
+    power, temp, _, mode = setpoint4(
+        room=18.0, current_set=29.0, heat_allowed=True, heating_now=True
+    )
+    assert (power, temp, mode) == ("on", 30.0, "warm")
+
+
+def test_暖房は帯に少し入ってから切る():
+    # 暖房オフのしきい値は min(low + hyst, high) = min(24.7, 25.5) = 24.7℃
+    power, temp, _, mode = setpoint4(
+        room=24.3, current_set=26.0, heat_allowed=True, heating_now=True
+    )
+    assert (power, temp, mode) == ("on", 26.0, "warm")   # 24.3 < 24.7 → 継続
+
+    power, temp, _, mode = setpoint4(
+        room=24.8, current_set=26.0, heat_allowed=True, heating_now=True
+    )
+    assert (power, temp, mode) == ("off", None, None)     # 24.8 ≥ 24.7 → 停止
+
+
+def test_帯が狭くても暖房オフのしきい値は上端を超えない():
+    # low=21.0, high=21.5 だと low + hyst(0.7) = 21.7 が high を超えるので 21.5 で切る
+    power, _, _, mode = logic.room_target_setpoint(
+        21.6, 23.0, 21.0, 21.5, GAIN, SET_MIN, SET_MAX, DEAD,
+        heat_allowed=True, heating_now=True,
+    )
+    assert (power, mode) == ("off", None)
+
+
+def test_冬は帯内で停止中なら停止のまま():
+    # 外気が冷たい(heat_allowed)とき、帯内で冷房を始めたりしない
+    power, temp, _, mode = setpoint4(room=24.5, current_set=None, heat_allowed=True)
+    assert (power, temp, mode) == ("off", None, None)
+
+
+def test_冷房運転中の帯内維持は従来どおり():
+    # 冷房で運転中（current_set あり・暖房中でない）なら、外気が冷たくても帯内は維持
+    power, temp, _, mode = setpoint4(room=24.5, current_set=22.0, heat_allowed=True)
+    assert (power, temp, mode) == ("on", 22.0, "cool")
 
 
 # --- decide への組み込み ---
