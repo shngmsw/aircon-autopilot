@@ -186,8 +186,12 @@ async def run_cycle(client: httpx.AsyncClient) -> dict:
         # apply_settings が temperature を送らないので、比較対象にもしない
         temp_opts = remo.mode_temp_options(aircon, want_mode) if want_mode else []
         vol_opts = remo.mode_vol_options(aircon, want_mode) if want_mode else []
+        # 暖房は上に丸めると暑くなりすぎるので切り捨て（25.5℃ → 25℃）
+        round_temp = (
+            remo.floor_temp if want_mode == logic.WARM_MODE else remo.nearest_temp
+        )
         want_temp = (
-            remo.nearest_temp(d.target_temp, temp_opts)
+            round_temp(d.target_temp, temp_opts)
             if d.target_temp is not None and temp_opts else None
         )
         want_vol = remo.pick_volume(d.volume_pref, vol_opts) if d.volume_pref else None

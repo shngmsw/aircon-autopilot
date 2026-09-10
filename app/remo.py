@@ -150,6 +150,25 @@ def nearest_temp(target: float, options: list[str]) -> str:
     return numeric[0][1]
 
 
+def floor_temp(target: float, options: list[str]) -> str:
+    """希望温度を、機種が受け付ける温度のうち希望以下で最も高い値に丸める。
+
+    暖房用。上に丸めると暑くなりすぎるため。希望以下の候補が無ければ
+    最小の候補を返す。数値でない候補は無視する。
+    """
+    numeric = []
+    for o in options:
+        try:
+            numeric.append((float(o), o))
+        except ValueError:
+            continue
+    if not numeric:
+        return str(int(target))
+    numeric.sort(key=lambda x: x[0])
+    under = [o for v, o in numeric if v <= target]
+    return under[-1] if under else numeric[0][1]
+
+
 def pick_volume(pref: str, options: list[str]) -> str:
     """希望風量('auto'=エアコン任せ, 'max'=最強, 'min'=弱め)を機種の対応値から選ぶ。"""
     if not options:

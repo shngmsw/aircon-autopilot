@@ -78,9 +78,9 @@ def setpoint4(room, current_set, **kw):
 # --- 暖房 ---
 
 def test_外気が冷たく目標を下回れば暖房する():
-    # 2.0℃不足 × gain1.5 = 3 → low(24) + 3 = 27℃
+    # 2.0℃不足 × gain1.5 = 3 → low(24) + 3 = 27℃ だが、目標上限25.5℃で頭打ち
     power, temp, _, mode = setpoint4(room=22.0, current_set=None, heat_allowed=True)
-    assert (power, temp, mode) == ("on", 27.0, "warm")
+    assert (power, temp, mode) == ("on", 25.5, "warm")
 
 
 def test_暖房を許可しなければ従来どおり停止する():
@@ -97,11 +97,39 @@ def test_暖房中に上端を超えたら一旦停止する():
     assert "超えたので暖房を停止" in reason
 
 
-def test_暖房の設定温度は上限で止まる():
-    power, temp, _, mode = setpoint4(
+def test_暖房の設定温度は目標帯の上限を超えない():
+    # 2.0℃不足でも 24+3=27℃ には上げず、目標上限25.5℃で止める
+    power, temp, _, mode = setpoint4(room=22.0, current_set=None, heat_allowed=True)
+    assert (power, temp, mode) == ("on", 25.5, "warm")
+
+    # すでに上限で運転中なら、まだ足りなくてもこれ以上は上げない
+    power, temp, reason, mode = setpoint4(
+        room=22.0, current_set=25.5, heat_allowed=True, heating_now=True
+    )
+    assert (power, temp, mode) == ("on", 25.5, "warm")
+    assert "頭打ち" in reason
+
+
+def test_上限を超えている設定は目標上限まで下げる():
+    power, temp, reason, mode = setpoint4(
         room=18.0, current_set=29.0, heat_allowed=True, heating_now=True
     )
+    assert (power, temp, mode) == ("on", 25.5, "warm")
+    assert "へ下げる" in reason
+
+
+def test_目標上限より_set_maxが低ければ_set_maxで止まる():
+    # 帯 28〜31℃ だと目標上限31℃より set_max(30℃) の方が低い
+    power, temp, _, mode = logic.room_target_setpoint(
+        26.0, None, 28.0, 31.0, GAIN, SET_MIN, SET_MAX, DEAD, heat_allowed=True
+    )
     assert (power, temp, mode) == ("on", 30.0, "warm")
+
+
+def test_理由の温度表示は25_5を26にしない():
+    _, _, reason, _ = setpoint4(room=22.0, current_set=None, heat_allowed=True)
+    assert "25.5℃" in reason
+    assert "26℃" not in reason
 
 
 def test_暖房は帯に少し入ってから切る():
@@ -109,7 +137,8 @@ def test_暖房は帯に少し入ってから切る():
     power, temp, _, mode = setpoint4(
         room=24.3, current_set=26.0, heat_allowed=True, heating_now=True
     )
-    assert (power, temp, mode) == ("on", 26.0, "warm")   # 24.3 < 24.7 → 継続
+    # 24.3 < 24.7 → 継続。設定26℃は目標上限を超えるので25.5℃へ下げる
+    assert (power, temp, mode) == ("on", 25.5, "warm")
 
     power, temp, _, mode = setpoint4(
         room=24.8, current_set=26.0, heat_allowed=True, heating_now=True
@@ -209,8 +238,8 @@ def test_目標帯の中なら風量はauto():
 
 def test_decideで外気が冷たく目標を下回れば暖房する():
     d = call(outdoor=10.0, room=22.0)
-    # 2.0℃不足 × gain1.5 = 3 → 24+3=27℃。不足2.0 ≥ 1.0 なので風量max
-    assert (d.power, d.mode, d.target_temp, d.volume_pref) == ("on", "warm", 27.0, "max")
+    # 2.0℃不足 × gain1.5 = 3 だが目標上限25.5℃で頭打ち。不足2.0 ≥ 1.0 なので風量max
+    assert (d.power, d.mode, d.target_temp, d.volume_pref) == ("on", "warm", 25.5, "max")
 
 
 def test_不足が小さければ暖房の風量はauto():
@@ -239,7 +268,8 @@ def test_暖房判定では外気冷却モードに入らない():
 
 def test_decideでも暖房は帯に少し入ってから切る():
     d = call(outdoor=10.0, room=24.3, current_set=26.0, heating_now=True)
-    assert (d.power, d.mode, d.target_temp) == ("on", "warm", 26.0)
+    # 継続するが、設定は目標上限25.5℃まで下げる
+    assert (d.power, d.mode, d.target_temp) == ("on", "warm", 25.5)
 
     d = call(outdoor=10.0, room=24.8, current_set=26.0, heating_now=True)
     assert d.power == "off"

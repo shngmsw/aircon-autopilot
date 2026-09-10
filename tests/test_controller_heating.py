@@ -107,6 +107,30 @@ def test_目標帯はstateのオーバーライドが優先される(env):
     assert calls[-1]["temp"] == "25"   # 1.0℃不足 × gain1.0 → 24+1=25℃
 
 
+def test_暖房は目標帯の上限までしか上げない(env):
+    state, calls = env
+    store.set_state("room_target_low", 24.0)
+    store.set_state("room_target_high", 25.5)
+
+    # 2.0℃不足 × gain1.0 → 26℃ にはせず、目標上限25.5℃ → 切り捨てて25℃
+    state["room"] = 22.0
+    run()
+    assert calls[-1]["mode"] == "warm"
+    assert calls[-1]["temp"] == "25"
+
+
+def test_上限を超えた設定で暖房中なら設定を下げる(env):
+    state, calls = env
+    store.set_state("room_target_low", 24.0)
+    store.set_state("room_target_high", 25.5)
+
+    state["aircon"] = _aircon(True, "warm", temp="27")
+    state["room"] = 22.0
+    run()
+    assert calls[-1]["mode"] == "warm"
+    assert calls[-1]["temp"] == "25"
+
+
 def test_寒ければ暖房し_設定温度は不足に応じて上がる(env):
     state, calls = env
     # 室温18℃・目標20〜22℃ → 2℃不足 × gain1.0 → 設定 20+2=22℃
