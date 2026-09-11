@@ -69,3 +69,13 @@ def test_statusに目標帯が載る(client, monkeypatch):
     monkeypatch.setattr(remo, "fetch_snapshot", fake_snapshot)
     rt = client.get("/api/status").json()["room_target"]
     assert rt == {"enabled": config.ROOM_TARGET_ENABLED, "low": 24.0, "high": 25.5, "source": "env"}
+
+
+def test_statusに切替クッションの状況が載る(client, monkeypatch):
+    async def fake_snapshot(c):
+        return remo.Snapshot(room_temp=None, humidity=None, aircon=None)
+    monkeypatch.setattr(remo, "fetch_snapshot", fake_snapshot)
+    # 直前の運転の記録が無ければ待ちなし
+    assert client.get("/api/status").json()["mode_switch"] == {
+        "last_mode": None, "wait_until": None,
+    }

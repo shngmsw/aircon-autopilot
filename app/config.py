@@ -80,6 +80,11 @@ ROOM_TARGET_MAX_VOL_OVER = _f("ROOM_TARGET_MAX_VOL_OVER", 1.0)
 # 夏の朝など「たまたま室温が帯を下回った」だけで暖房しないためのガード
 HEAT_OUT_MAX = _f("HEAT_OUT_MAX", 20.0)
 
+# 冷房(送風含む)と暖房を切り替えるとき、間に挟む停止時間(分)。
+# 冷やしすぎた直後に暖房、暖めすぎた直後に冷房、とやると行き過ぎるので、
+# しばらく止めて外気に任せる。0 で無効
+MODE_SWITCH_COOLDOWN_MIN = _i("MODE_SWITCH_COOLDOWN_MIN", 60)
+
 DB_PATH = os.environ.get("DB_PATH", str(BASE_DIR / "data" / "aircon.db"))
 HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = _i("PORT", 8000)

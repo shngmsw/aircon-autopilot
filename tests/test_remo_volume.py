@@ -37,3 +37,22 @@ def test_数値が二桁でも文字列比較にならない():
 def test_候補が空なら空文字を返す():
     assert remo.pick_volume("auto", []) == ""
     assert remo.pick_volume("max", []) == ""
+
+
+# --- 暖房用の温度の丸め（app/remo.floor_temp）---
+
+def test_暖房は希望以下で最も高い温度に丸める():
+    # 上に丸めると暑くなりすぎるので 25.5℃ は 25℃ にする
+    assert remo.floor_temp(25.5, ["24", "25", "26"]) == "25"
+
+
+def test_0_5刻みの機種ならその値を選ぶ():
+    assert remo.floor_temp(25.5, ["25", "25.5", "26"]) == "25.5"
+
+
+def test_希望以下の候補が無ければ最小の候補を選ぶ():
+    assert remo.floor_temp(17.0, ["18", "19"]) == "18"
+
+
+def test_候補が無ければ希望温度をそのまま返す():
+    assert remo.floor_temp(25.0, []) == "25"

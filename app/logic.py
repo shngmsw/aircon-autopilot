@@ -30,6 +30,11 @@ BLOW_MODE = "blow"
 WARM_MODE = "warm"
 
 
+def _t(v: float) -> str:
+    """設定温度を表示用の文字列にする（25.5→"25.5"、26.0→"26"）。"""
+    return f"{v:g}"
+
+
 @dataclass
 class Decision:
     power: str            # "on" / "off"
@@ -41,6 +46,7 @@ class Decision:
     mode: str | None = "cool"      # "cool" / "blow" / None(=電源オフ)
     free_cool: bool = False        # 外気冷却モードで動いているか
     free_cool_abort: bool = False  # 室温上昇で冷房へ復帰した回か（ロックアウト開始の合図）
+    switch_wait: bool = False      # 冷房⇄暖房の切替クッションで停止した回か
 
 
 def _raw_tier(value: float, thresholds: list[float]) -> int:
@@ -102,15 +108,18 @@ def room_target_setpoint(
 
     - 室温が high を超えている → 冷房。超過分×gain だけ設定を下げる（set_min まで）
     - 室温が low を下回った    → heat_allowed なら暖房。不足分×gain だけ設定を
-      上げる（set_max まで）。heat_allowed でなければ従来どおり停止
+      上げる。暖房の設定温度は目標帯の上限 high（と set_max）を超えない。
+      暖房は設定温度を上げすぎると暑くなりすぎるため。
+      heat_allowed でなければ従来どおり停止
     - 目標帯の中               → 冷房運転中なら現状維持。暖房中は
       room ≥ min(low + hyst, high) で電源オフ（low ちょうどでの振動を防ぐため
       帯に少し入ってから切る。帯が hyst より狭くても上端は超えない）。
       停止中で外気も冷たい(heat_allowed)なら停止のまま
 
     current_set が None（今オフなど）のときは、冷房は high・暖房は low を
-    初期値として始める。heating_now は「いま暖房で運転中か」（controller が
-    実機の状態から渡す）。
+    初期値として始める。ただし暖房の設定温度は目標帯の上限 high（と set_max）を
+    超えない。暖房は設定温度を上げすぎると暑くなりすぎるため。
+    heating_now は「いま暖房で運転中か」（controller が実機の状態から渡す）。
     """
     heat_off = min(low + hyst, high)
 
@@ -135,11 +144,11 @@ def room_target_setpoint(
         if want >= base:
             return "on", set_min, (
                 f"室温{room:.1f}℃が目標{high:.1f}℃を超えているが"
-                f"設定は下限{set_min:.0f}℃。これ以上下げられない"
+                f"設定は下限{_t(set_min)}℃。これ以上下げられない"
             ), "cool"
         return "on", want, (
             f"室温{room:.1f}℃が目標{high:.1f}℃を{over:.1f}℃超過"
-            f" → 設定を{base:.0f}℃から{want:.0f}℃へ下げる"
+            f" → 設定を{_t(base)}℃から{_t(want)}℃へ下げる"
         ), "cool"
 
     if room < low or heating_now:
@@ -148,19 +157,34 @@ def room_target_setpoint(
         # （夏の朝の誤暖房防止。ガードは呼び出し側が heat_allowed で判断）
         if not heat_allowed:
             return "off", None, f"室温{room:.1f}℃は目標{low:.1f}℃を下回るので停止", None
+        # 暖房の設定温度は目標帯の上限 high（と set_max）を超えない。
+        # 上げすぎると部屋が暑くなりすぎるため
+        heat_cap = min(set_max, high)
         base = current_set if (heating_now and current_set is not None) else low
         under = low - room
         if under > 0:
             raise_by = max(1.0, round(under * gain))
-            want = min(set_max, base + raise_by)
-            if want <= base:
-                return "on", set_max, (
+            want = min(heat_cap, base + raise_by)
+            if base > heat_cap:
+                return "on", heat_cap, (
+                    f"室温{room:.1f}℃が目標{low:.1f}℃を下回るが、"
+                    f"設定{_t(base)}℃は目標上限{_t(heat_cap)}℃を超えているので"
+                    f"{_t(heat_cap)}℃へ下げる"
+                ), WARM_MODE
+            if base == heat_cap:
+                return "on", heat_cap, (
                     f"室温{room:.1f}℃が目標{low:.1f}℃を下回るが"
-                    f"設定は上限{set_max:.0f}℃。これ以上上げられない"
+                    f"設定は目標上限{_t(heat_cap)}℃で頭打ち。"
+                    f"暖房で暑くなりすぎないよう、これ以上は上げない"
                 ), WARM_MODE
             return "on", want, (
                 f"室温{room:.1f}℃が目標{low:.1f}℃を{under:.1f}℃不足"
-                f" → 設定を{base:.0f}℃から{want:.0f}℃へ上げる"
+                f" → 設定を{_t(base)}℃から{_t(want)}℃へ上げる"
+            ), WARM_MODE
+        if base > heat_cap:
+            return "on", heat_cap, (
+                f"室温{room:.1f}℃は帯の下端付近なので暖房を継続。"
+                f"設定{_t(base)}℃は目標上限を超えているので{_t(heat_cap)}℃へ下げる"
             ), WARM_MODE
         return "on", base, f"室温{room:.1f}℃は帯の下端付近なので暖房を継続", WARM_MODE
 
@@ -172,7 +196,7 @@ def room_target_setpoint(
     base = current_set if current_set is not None else high
     if high - room <= deadband:
         return "on", base, (
-            f"室温{room:.1f}℃は目標帯の上端付近なので設定{base:.0f}℃を維持"
+            f"室温{room:.1f}℃は目標帯の上端付近なので設定{_t(base)}℃を維持"
         ), "cool"
     return "on", base, f"室温{room:.1f}℃は目標帯({low:.1f}〜{high:.1f}℃)内", "cool"
 
@@ -218,6 +242,7 @@ def decide(
     current_set_temp: float | None = None,
     heat_out_max: float = 20.0,
     heating_now: bool = False,
+    recent_mode: str | None = None,
 ) -> Decision:
     """外気温・室温・湿度から運転内容を決める（純粋関数）。
 
@@ -237,8 +262,15 @@ def decide(
     目標室温は外気で変えない。外気は「冷房か送風か」の判断にだけ使う。
 
     室温が room_target_low を下回り、かつ外気温が heat_out_max より低ければ
-    暖房(warm)する。heating_now は「いま暖房で運転中か」で、暖房オフの
+    暖房(warm)する。暖房の設定温度は目標帯の上限(room_target_high)と
+    room_target_set_max の低い方を超えない（上げすぎると暑くなりすぎるため）。
+    heating_now は「いま暖房で運転中か」で、暖房オフの
     ヒステリシス判定に使う。暖房は室温追従モード限定（マトリクスは冷房専用）。
+
+    recent_mode は「クッション時間内に運転していたモード
+    （"cool" / "blow" / "warm"）。無ければ None」。
+    直前に冷房・送風が動いていれば暖房を始めず、直前に暖房が動いていれば
+    冷房・送風を始めない。その間は停止して外気に任せる。
     """
     out_tier = tier_with_hysteresis(outdoor, OUT_THRESHOLDS, last_out_tier, hyst)
     room_tier = tier_with_hysteresis(room, ROOM_THRESHOLDS, last_room_tier, hyst)
@@ -318,6 +350,21 @@ def decide(
                 free_cool = True
                 reason += " → 外気が涼しいので冷房不要"
 
+    # 冷房⇄暖房の切替クッション。直前に反対のことをしていたら、
+    # すぐに逆方向へ回さずしばらく止めて外気に任せる
+    switch_wait = False
+    if power == "on" and mode == WARM_MODE and recent_mode in ("cool", BLOW_MODE):
+        power, temp, vol, mode = "off", None, None, None
+        free_cool = False
+        switch_wait = True
+        reason += " → 冷房を止めてから間もないので暖房せず停止（外気に任せて様子見）"
+    elif power == "on" and mode in ("cool", BLOW_MODE) and recent_mode == WARM_MODE:
+        power, temp, vol, mode = "off", None, None, None
+        free_cool = False
+        free_cool_abort = False
+        switch_wait = True
+        reason += " → 暖房を止めてから間もないので冷房せず停止（外気に任せて様子見）"
+
     return Decision(
         power=power,
         target_temp=temp,
@@ -328,4 +375,5 @@ def decide(
         mode=mode,
         free_cool=free_cool,
         free_cool_abort=free_cool_abort,
+        switch_wait=switch_wait,
     )

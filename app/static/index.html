@@ -167,6 +167,7 @@
     <span class="chip" id="autoChip">自動制御 --</span>
     <span class="chip" id="humChip">湿度 --%</span>
     <span class="chip" id="freeCoolChip" style="display:none">外気冷却中</span>
+    <span class="chip" id="modeSwitchChip" style="display:none">切替待ち</span>
   </div>
   <div class="note" id="lastNote">読み込み中…</div>
 </section>
@@ -320,6 +321,20 @@ function renderStatus() {
   } else {
     fcChip.style.display = "none";
   }
+  // 冷房⇄暖房の切替クッション（この間は停止して外気に任せる）
+  const ms = state.mode_switch || {};
+  const msChip = $("modeSwitchChip");
+  if (ms.wait_until && ac && !ac.power_on) {
+    // 運転中は「直前の運転＝いまの運転」なので出さない。停止中だけ意味がある
+    const t = new Date(ms.wait_until).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+    const labels = { cool: "冷房", blow: "送風", warm: "暖房" };
+    const label = labels[ms.last_mode] || "運転";
+    msChip.style.display = "";
+    msChip.className = "chip";
+    msChip.textContent = `${label}後の切替待ち ${t}まで`;
+  } else {
+    msChip.style.display = "none";
+  }
   $("blowBtn").disabled = !(ac && ac.supports_blow);
 
   const autoChip = $("autoChip");
@@ -436,24 +451,27 @@ async function loadStatus() {
 
 // ---------- グラフ ----------
 const MINT_BAND = "rgba(31, 169, 126, .12)";  // --mint の薄塗り
+const HEAT_BAND = "rgba(224, 112, 46, .16)";  // --heat の薄塗り（暖房区間）
 
-// 冷房ON区間の背景帯を描くプラグイン
+// 運転区間の背景帯を描くプラグイン（冷房/送風は緑、暖房は赤の背景帯）
 const powerBands = {
   id: "powerBands",
   beforeDatasetsDraw(chart) {
     const { ctx, chartArea, scales } = chart;
     if (!chartArea || !histRows.length) return;
     const px = (i) => scales.x.getPixelForValue(i);
+    const kind = (r) => r.power !== "on" ? null : (r.mode === "warm" ? "warm" : "cool");
     ctx.save();
-    ctx.fillStyle = MINT_BAND;
     const n = histRows.length;
     let i = 0;
     while (i < n) {
-      if (histRows[i].power !== "on") { i++; continue; }
+      const k = kind(histRows[i]);
+      if (k === null) { i++; continue; }
       let j = i;
-      while (j + 1 < n && histRows[j + 1].power === "on") j++;
+      while (j + 1 < n && kind(histRows[j + 1]) === k) j++;
       const left = i === 0 ? chartArea.left : (px(i - 1) + px(i)) / 2;
       const right = j === n - 1 ? chartArea.right : (px(j) + px(j + 1)) / 2;
+      ctx.fillStyle = k === "warm" ? HEAT_BAND : MINT_BAND;
       ctx.fillRect(left, chartArea.top, right - left, chartArea.bottom - chartArea.top);
       i = j + 1;
     }
@@ -485,8 +503,10 @@ async function loadHistory() {
       { label: "設定温度", data: rows.map(r => (r.power === "on" && r.mode !== "blow") ? r.set_temp : null),
         borderColor: css("--setline"), backgroundColor: "transparent",
         borderWidth: 1.5, borderDash: [5, 4], pointRadius: 0, stepped: true, spanGaps: false },
-      { label: "運転ON", data: [], borderColor: MINT_BAND,
+      { label: "冷房/送風", data: [], borderColor: MINT_BAND,
         backgroundColor: MINT_BAND, borderWidth: 6 },
+      { label: "暖房", data: [], borderColor: HEAT_BAND,
+        backgroundColor: HEAT_BAND, borderWidth: 6 },
     ],
   };
   const options = {
