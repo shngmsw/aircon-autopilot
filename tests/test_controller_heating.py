@@ -3,6 +3,7 @@
 Remo と天気 API をモックし、SQLite は一時ファイルを使う。
 """
 import asyncio
+from datetime import timedelta
 
 import pytest
 
@@ -50,6 +51,8 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "ROOM_TARGET_GAIN", 1.0)
     monkeypatch.setattr(config, "FREE_COOL_ENABLED", False)
     monkeypatch.setattr(config, "HEAT_OUT_MAX", 20.0)
+    # 切替クッションは既定で無効。必要なテストだけ個別に有効化する
+    monkeypatch.setattr(config, "MODE_SWITCH_COOLDOWN_MIN", 0)
 
     calls: list[dict] = []
 
@@ -188,3 +191,58 @@ def test_暖房の温度指定が無い機種では温度を送らず現状維�
     r = run()   # 2サイクル目: 実機状態は変わらないが、温度を比較対象にしないので現状維持
     assert len(calls) == n
     assert "現状維持" in r["note"]
+
+
+# --- 冷房⇄暖房の切替クッション ---
+
+def test_冷房中に帯を下回っても直後は暖房せず停止する(env, monkeypatch):
+    state, calls = env
+    monkeypatch.setattr(config, "MODE_SWITCH_COOLDOWN_MIN", 60)
+    state["aircon"] = _aircon(True, "cool", temp="25")
+    state["room"] = 18.0
+    r = run()
+    assert calls[-1]["power"] == "off"
+    assert "暖房せず停止" in r["note"]
+    assert "まで" in r["note"]
+
+
+def test_クッション時間が過ぎれば暖房する(env, monkeypatch):
+    state, calls = env
+    monkeypatch.setattr(config, "MODE_SWITCH_COOLDOWN_MIN", 60)
+    store.set_state("last_run_mode", "cool")
+    store.set_state(
+        "last_run_ts", (store.now_jst() - timedelta(minutes=61)).isoformat()
+    )
+    state["room"] = 18.0
+    run()
+    assert calls[-1]["power"] == "on"
+    assert calls[-1]["mode"] == "warm"
+
+
+def test_暖房停止直後は冷房しない(env, monkeypatch):
+    state, calls = env
+    monkeypatch.setattr(config, "MODE_SWITCH_COOLDOWN_MIN", 60)
+    store.set_state("last_run_mode", "warm")
+    store.set_state("last_run_ts", store.now_jst().isoformat())
+    state["room"] = 24.0   # 目標帯の上限22℃より上
+    r = run()
+    assert calls == []     # 停止中のままなので操作もしない
+    assert "冷房せず停止" in r["note"]
+
+    # クッションが明ければ冷房を始める
+    store.set_state(
+        "last_run_ts", (store.now_jst() - timedelta(minutes=61)).isoformat()
+    )
+    run()
+    assert calls[-1]["power"] == "on"
+    assert calls[-1]["mode"] == "cool"
+
+
+def test_手動運転も直前の運転として数える(env, monkeypatch):
+    state, calls = env
+    monkeypatch.setattr(config, "MODE_SWITCH_COOLDOWN_MIN", 60)
+    state["aircon"] = _aircon(True, "warm", temp="22")
+    state["room"] = 21.0   # 帯に入っているので暖房は止まる
+    run()
+    assert calls[-1]["power"] == "off"
+    assert store.get_state("last_run_mode") == "warm"

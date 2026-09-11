@@ -134,6 +134,13 @@ Windows 再起動後は WSL 自体が止まっているため、スタートア�
 - 暖房中に室温が上限を超えた場合も、一旦電源を切ります（冷房が必要かどうかは次のサイクルで判断します）
 - 暖房に対応していない機種では、電源オフにフォールバックします
 
+### 冷房と暖房の切り替え（停止クッション）
+
+冷房（送風を含む）を止めてから `MODE_SWITCH_COOLDOWN_MIN`（既定60分）は暖房を始めません。
+暖房を止めてからも、同じ時間は冷房・送風を始めません。その間はエアコンを止めておき、
+外気に引かれて室温が戻るのを待ちます（冷やしすぎた直後に暖房すると行き過ぎるためです）。
+手動運転も「直前の運転」として数えます。`0` にすると無効です。
+
 目標帯はWebダッシュボードの「目標室温」カードから変更できます。UIで保存した値はSQLiteに残り、`.env` の `ROOM_TARGET_LOW` / `ROOM_TARGET_HIGH` より優先されます（`.env` は初期値扱いです）。
 
 ### 外気冷却モード（送風）
@@ -188,12 +195,13 @@ Windows 再起動後は WSL 自体が止まっているため、スタートア�
 | `ROOM_TARGET_DEADBAND` | `0.3` | 目標上限にこれだけ近ければ設定を動かさない（℃） |
 | `ROOM_TARGET_MAX_VOL_OVER` | `1.0` | 目標をこれ以上超えていたら風量を最強にする（℃） |
 | `HEAT_OUT_MAX` | `20.0` | 室温が目標帯の下限を下回っても、外気温がこれ以上なら暖房しない（℃） |
+| `MODE_SWITCH_COOLDOWN_MIN` | `60` | 冷房（送風含む）と暖房を切り替えるとき、間に挟む停止時間（分）。`0` で無効 |
 
 ## API
 
 | メソッド | パス | 説明 |
 |---|---|---|
-| GET | `/api/status` | 現在値・エアコン状態（運転モード `mode`、対応モード `modes`、`supports_blow`）・自動制御の状態（`auto`と`auto_state`: `on`/`off`/`paused_external`）・外気冷却モードの状況（`free_cool`: `active` と再突入禁止の解除時刻 `lockout_until`）・目標室温の帯（`room_target`: `enabled`/`low`/`high`/`source`） |
+| GET | `/api/status` | 現在値・エアコン状態（運転モード `mode`、対応モード `modes`、`supports_blow`）・自動制御の状態（`auto`と`auto_state`: `on`/`off`/`paused_external`）・外気冷却モードの状況（`free_cool`: `active` と再突入禁止の解除時刻 `lockout_until`）・冷房⇄暖房の切替クッション（`mode_switch`: 直前の運転モード `last_mode` と解除時刻 `wait_until`）・目標室温の帯（`room_target`: `enabled`/`low`/`high`/`source`） |
 | GET | `/api/history?hours=24` | 記録の取得（1〜744時間） |
 | GET | `/api/settings` | 目標室温の帯（`room_target_low` / `room_target_high`）と出所（`source`: `override`=UIで保存済み / `env`=.envの既定値） |
 | POST | `/api/settings` `{"low": 20.0, "high": 22.0}` | 目標室温の帯を保存（16〜30℃・下限+0.5℃≦上限）。保存後すぐ判定サイクルを実行 |

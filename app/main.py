@@ -83,6 +83,7 @@ async def status():
     latest = store.latest_reading()
     aircon = snap.aircon
     lockout_active, lockout_until = controller.free_cool_lockout()
+    switch_mode, switch_until = controller.mode_switch_wait()
     rt_low, rt_high, rt_source = controller.effective_target_band()
     return {
         "now": store.now_jst().isoformat(timespec="seconds"),
@@ -108,6 +109,12 @@ async def status():
             "lockout_until": (
                 lockout_until.isoformat(timespec="seconds")
                 if lockout_active and lockout_until else None
+            ),
+        },
+        "mode_switch": {
+            "last_mode": switch_mode,
+            "wait_until": (
+                switch_until.isoformat(timespec="seconds") if switch_until else None
             ),
         },
         "room_target": {

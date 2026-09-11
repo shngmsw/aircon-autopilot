@@ -46,6 +46,7 @@ class Decision:
     mode: str | None = "cool"      # "cool" / "blow" / None(=電源オフ)
     free_cool: bool = False        # 外気冷却モードで動いているか
     free_cool_abort: bool = False  # 室温上昇で冷房へ復帰した回か（ロックアウト開始の合図）
+    switch_wait: bool = False      # 冷房⇄暖房の切替クッションで停止した回か
 
 
 def _raw_tier(value: float, thresholds: list[float]) -> int:
@@ -241,6 +242,7 @@ def decide(
     current_set_temp: float | None = None,
     heat_out_max: float = 20.0,
     heating_now: bool = False,
+    recent_mode: str | None = None,
 ) -> Decision:
     """外気温・室温・湿度から運転内容を決める（純粋関数）。
 
@@ -264,6 +266,11 @@ def decide(
     room_target_set_max の低い方を超えない（上げすぎると暑くなりすぎるため）。
     heating_now は「いま暖房で運転中か」で、暖房オフの
     ヒステリシス判定に使う。暖房は室温追従モード限定（マトリクスは冷房専用）。
+
+    recent_mode は「クッション時間内に運転していたモード
+    （"cool" / "blow" / "warm"）。無ければ None」。
+    直前に冷房・送風が動いていれば暖房を始めず、直前に暖房が動いていれば
+    冷房・送風を始めない。その間は停止して外気に任せる。
     """
     out_tier = tier_with_hysteresis(outdoor, OUT_THRESHOLDS, last_out_tier, hyst)
     room_tier = tier_with_hysteresis(room, ROOM_THRESHOLDS, last_room_tier, hyst)
@@ -343,6 +350,21 @@ def decide(
                 free_cool = True
                 reason += " → 外気が涼しいので冷房不要"
 
+    # 冷房⇄暖房の切替クッション。直前に反対のことをしていたら、
+    # すぐに逆方向へ回さずしばらく止めて外気に任せる
+    switch_wait = False
+    if power == "on" and mode == WARM_MODE and recent_mode in ("cool", BLOW_MODE):
+        power, temp, vol, mode = "off", None, None, None
+        free_cool = False
+        switch_wait = True
+        reason += " → 冷房を止めてから間もないので暖房せず停止（外気に任せて様子見）"
+    elif power == "on" and mode in ("cool", BLOW_MODE) and recent_mode == WARM_MODE:
+        power, temp, vol, mode = "off", None, None, None
+        free_cool = False
+        free_cool_abort = False
+        switch_wait = True
+        reason += " → 暖房を止めてから間もないので冷房せず停止（外気に任せて様子見）"
+
     return Decision(
         power=power,
         target_temp=temp,
@@ -353,4 +375,5 @@ def decide(
         mode=mode,
         free_cool=free_cool,
         free_cool_abort=free_cool_abort,
+        switch_wait=switch_wait,
     )

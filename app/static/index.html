@@ -167,6 +167,7 @@
     <span class="chip" id="autoChip">自動制御 --</span>
     <span class="chip" id="humChip">湿度 --%</span>
     <span class="chip" id="freeCoolChip" style="display:none">外気冷却中</span>
+    <span class="chip" id="modeSwitchChip" style="display:none">切替待ち</span>
   </div>
   <div class="note" id="lastNote">読み込み中…</div>
 </section>
@@ -319,6 +320,20 @@ function renderStatus() {
     fcChip.textContent = `送風休止 ${t}まで`;
   } else {
     fcChip.style.display = "none";
+  }
+  // 冷房⇄暖房の切替クッション（この間は停止して外気に任せる）
+  const ms = state.mode_switch || {};
+  const msChip = $("modeSwitchChip");
+  if (ms.wait_until && ac && !ac.power_on) {
+    // 運転中は「直前の運転＝いまの運転」なので出さない。停止中だけ意味がある
+    const t = new Date(ms.wait_until).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+    const labels = { cool: "冷房", blow: "送風", warm: "暖房" };
+    const label = labels[ms.last_mode] || "運転";
+    msChip.style.display = "";
+    msChip.className = "chip";
+    msChip.textContent = `${label}後の切替待ち ${t}まで`;
+  } else {
+    msChip.style.display = "none";
   }
   $("blowBtn").disabled = !(ac && ac.supports_blow);
 

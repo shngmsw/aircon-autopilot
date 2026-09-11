@@ -283,3 +283,34 @@ def test_冬に帯内で停止中なら停止のまま():
 def test_外気が上限ちょうどなら暖房しない():
     d = call(outdoor=20.0, room=22.0, heat_out_max=20.0)
     assert d.power == "off"
+
+
+# --- 冷房⇄暖房の切替クッション ---
+
+def test_冷房直後は暖房せず停止する():
+    for recent in ("cool", "blow"):
+        d = call(outdoor=10.0, room=22.0, recent_mode=recent)
+        assert (d.power, d.mode, d.target_temp) == ("off", None, None)
+        assert d.switch_wait is True
+        assert "暖房せず停止" in d.reason
+
+
+def test_暖房直後は冷房せず停止する():
+    d = call(outdoor=30.0, room=27.0, current_set=25.0, recent_mode="warm")
+    assert (d.power, d.mode) == ("off", None)
+    assert d.switch_wait is True
+    assert "冷房せず停止" in d.reason
+
+    # 送風（外気冷却）で始まる場合も止める
+    d = call(outdoor=15.0, room=26.0, free_cool_enabled=True, humidity=50,
+             recent_mode="warm")
+    assert (d.power, d.mode) == ("off", None)
+    assert (d.switch_wait, d.free_cool) == (True, False)
+
+
+def test_同じ側なら切替クッションで止めない():
+    d = call(outdoor=30.0, room=27.0, current_set=25.0, recent_mode="cool")
+    assert (d.power, d.mode, d.switch_wait) == ("on", "cool", False)
+
+    d = call(outdoor=10.0, room=22.0, recent_mode="warm")
+    assert (d.power, d.mode, d.switch_wait) == ("on", "warm", False)

@@ -37,6 +37,29 @@ def free_cool_lockout() -> tuple[bool, datetime | None]:
     return store.now_jst() < until, until
 
 
+def mode_switch_wait() -> tuple[str | None, datetime | None]:
+    """切替クッションの状態を返す。
+
+    直前に運転していたモード(last_run_mode)が、最後に運転を確認した時刻
+    (last_run_ts)から MODE_SWITCH_COOLDOWN_MIN 分以内なら (そのモード, 解除時刻)、
+    そうでなければ (None, None)。
+    """
+    if config.MODE_SWITCH_COOLDOWN_MIN <= 0:
+        return None, None
+    mode = store.get_state("last_run_mode")
+    raw = store.get_state("last_run_ts")
+    if not mode or not raw:
+        return None, None
+    try:
+        last_dt = datetime.fromisoformat(raw)
+    except (TypeError, ValueError):
+        return None, None
+    until = last_dt + timedelta(minutes=config.MODE_SWITCH_COOLDOWN_MIN)
+    if store.now_jst() < until:
+        return mode, until
+    return None, None
+
+
 def effective_target_band() -> tuple[float, float, str]:
     """有効な目標室温の帯 (low, high, 出所) を返す。
 
@@ -101,6 +124,14 @@ async def run_cycle(client: httpx.AsyncClient) -> dict:
             note = "外部オフにより一時停止中（オンで自動再開）"
             stop_here = True
 
+    if aircon is not None and aircon.power_on and aircon.mode in (
+        "cool", logic.WARM_MODE, logic.BLOW_MODE
+    ):
+        # 切替クッションの基準。手動運転も「直前の運転」として数えるので、
+        # 自動制御のオン・オフに関係なく記録する
+        store.set_state("last_run_mode", aircon.mode)
+        store.set_state("last_run_ts", store.now_jst().isoformat())
+
     auto = store.auto_enabled()
 
     if stop_here:
@@ -115,6 +146,7 @@ async def run_cycle(client: httpx.AsyncClient) -> dict:
         note = "外気温または室温が取得できず、操作を見送り"
     else:
         lockout_active, _ = free_cool_lockout()
+        recent_mode, switch_until = mode_switch_wait()
         rt_low, rt_high, _ = effective_target_band()
         # 室温追従は前回の設定温度を起点に上下させる。冷房・暖房以外(送風など)の
         # ときの値は基準にならないので渡さない
@@ -152,6 +184,7 @@ async def run_cycle(client: httpx.AsyncClient) -> dict:
             current_set_temp=current_set,
             heat_out_max=config.HEAT_OUT_MAX,
             heating_now=heating_now,
+            recent_mode=recent_mode,
         )
         store.set_state("last_out_tier", d.out_tier)
         store.set_state("last_room_tier", d.room_tier)
@@ -168,6 +201,8 @@ async def run_cycle(client: httpx.AsyncClient) -> dict:
             lockout_end = store.now_jst() + timedelta(minutes=config.FREE_COOL_LOCKOUT_MIN)
             store.set_state("free_cool_lockout_until", lockout_end.isoformat())
             reason += f"（{config.FREE_COOL_LOCKOUT_MIN}分は送風にしない）"
+        if d.switch_wait and switch_until:
+            reason += f"（{switch_until.strftime('%H:%M')}まで）"
 
         want_power = d.power
         want_mode = d.mode
@@ -228,6 +263,12 @@ async def run_cycle(client: httpx.AsyncClient) -> dict:
                 )
                 store.set_state("last_command_ts", store.now_jst().isoformat())
                 store.set_state("expected_power", want_power)
+                if want_power == "on" and want_mode in (
+                    "cool", logic.WARM_MODE, logic.BLOW_MODE
+                ):
+                    # 次の観測を待たずにクッションを数え始める
+                    store.set_state("last_run_mode", want_mode)
+                    store.set_state("last_run_ts", store.now_jst().isoformat())
                 action = "set"
                 if want_power == "off":
                     labels = {logic.BLOW_MODE: "送風", logic.WARM_MODE: "暖房"}
