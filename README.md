@@ -91,6 +91,32 @@ Windows 再起動後は WSL 自体が止まっているため、スタートア�
 `.vbs` を置いてログオン時に WSL を起こす（WSL が起動すれば linger 設定により
 サービスも自動で立ち上がる）。
 
+### Docker での常駐（shngmsw-ubuntu）
+
+2026-09-17 から自宅 PC / office-wsl の systemd 常駐をやめ、Docker 専用機 shngmsw-ubuntu の
+root dockerd 上でコンテナとして動かしている。ホストにはコードを置かず、手元の clone から
+リモートコンテキスト経由でビルド・起動する。
+
+ホスト側に置くもの（`~/apps/aircon-autopilot/`）:
+
+- `.env` … 秘密情報（`chmod 600`）。正は Bitwarden `aircon-autopilot:.env`
+- `data/aircon.db` … 記録データ（SQLite）。コンテナからは `/data` として見える
+
+```bash
+# ビルド（手元の clone で。Git Bash では MSYS_NO_PATHCONV=1 を付けてパス変換を止める）
+export MSYS_NO_PATHCONV=1
+docker --context shngmsw-ubuntu build -t aircon-autopilot:latest .
+
+# 起動（初回。更新時は先に docker --context shngmsw-ubuntu rm -f aircon-autopilot）
+docker --context shngmsw-ubuntu run -d --name aircon-autopilot   --restart unless-stopped --user 1000:1000 -p 8010:8000   -v /home/shngmsw/apps/aircon-autopilot/.env:/app/.env:ro   -v /home/shngmsw/apps/aircon-autopilot/data:/data   aircon-autopilot:latest
+
+# 確認
+docker --context shngmsw-ubuntu logs --tail 20 aircon-autopilot
+```
+
+ダッシュボードは Tailscale 経由で `http://shngmsw-ubuntu:8010/`（`100.78.189.53:8010`）。
+`--restart unless-stopped` なのでホスト再起動後も dockerd が自動で立ち上げる。
+
 ## 制御ロジック
 
 > **既定は室温追従モード**（`ROOM_TARGET_ENABLED=true`）です。その場合このマトリクスは

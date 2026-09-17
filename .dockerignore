@@ -1,0 +1,12 @@
+.git
+.venv
+.env
+.env.example
+data
+docs
+tests
+conftest.py
+requirements-dev.txt
+__pycache__
+.pytest_cache
+*.pyc
