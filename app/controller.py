@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 import httpx
 
-from . import config, logic, remo, store, weather
+from . import config, jev, logic, remo, store, weather
 
 log = logging.getLogger(__name__)
 
@@ -133,6 +133,8 @@ async def run_cycle(client: httpx.AsyncClient) -> dict:
         store.set_state("last_run_ts", store.now_jst().isoformat())
 
     auto = store.auto_enabled()
+    jev_state = None
+    jev_result = None
 
     if stop_here:
         pass
@@ -185,7 +187,37 @@ async def run_cycle(client: httpx.AsyncClient) -> dict:
             heat_out_max=config.HEAT_OUT_MAX,
             heating_now=heating_now,
             recent_mode=recent_mode,
+            passive_wait_enabled=config.PASSIVE_WAIT_ENABLED,
+            last_passive_wait=bool(store.get_state("passive_wait_active", False)),
+            passive_wait_out_max=config.PASSIVE_WAIT_OUT_MAX,
+            passive_wait_min_gap=config.PASSIVE_WAIT_MIN_GAP,
         )
+        if config.JEV_MODE != "off":
+            holding_now, hold_until = _hold_active()
+            command_before_jev = store.get_state("last_command_ts")
+            state = jev.build_state(
+                room=room, outdoor=outdoor, humidity=snap.humidity,
+                low=rt_low, high=rt_high, aircon=aircon, decision=d,
+                history=store.get_history(1), now=store.now_jst(),
+                constraints={"auto_state": store.auto_state(),
+                             "hold_active": holding_now and not skip_hold_check,
+                             "hold_until": hold_until,
+                             "switch_wait": d.switch_wait, "recent_mode": recent_mode,
+                             "free_cool_lockout": lockout_active},
+            )
+            result = await jev.evaluate(client, state)
+            cycle_superseded = (not store.auto_enabled()
+                                or store.get_state("last_command_ts") != command_before_jev)
+            d, selection = jev.select_decision(
+                d, result, aircon=aircon, room=room, outdoor=outdoor, low=rt_low, high=rt_high,
+                holding=holding_now and not skip_hold_check, recent_mode=recent_mode,
+                lockout=lockout_active,
+            )
+            result.update(accepted=selection == "accepted" and not cycle_superseded,
+                          selection="superseded" if cycle_superseded else selection)
+            jev_state, jev_result = state, result
+        else:
+            cycle_superseded = False
         store.set_state("last_out_tier", d.out_tier)
         store.set_state("last_room_tier", d.room_tier)
         was_free_cool = bool(store.get_state("free_cool_active", False))
@@ -248,7 +280,10 @@ async def run_cycle(client: httpx.AsyncClient) -> dict:
         if skip_hold_check:
             holding = False
 
-        if same:
+        if cycle_superseded:
+            auto = store.auto_enabled()
+            note = "Jev判定中に手動操作・自動制御変更があったため、この回の操作を見送り"
+        elif same:
             # 現状追認でも expected_power を実態に同期する（放置すると stale になり
             # 外部オフを検知できなくなる）
             store.set_state("expected_power", want_power)
@@ -295,6 +330,17 @@ async def run_cycle(client: httpx.AsyncClient) -> dict:
                 log.exception("エアコン操作に失敗")
                 action = "error"
                 note = f"操作失敗: {e}"
+
+        # 待機は実際に停止できた後に記録する。保持中や送信失敗では開始しない。
+        if not cycle_superseded:
+            store.set_state("passive_wait_active", d.passive_wait and not aircon.power_on)
+
+        if jev_result is not None:
+            jev_result["applied"] = jev_result["accepted"] and action == "set"
+            jev_result["outcome"] = "superseded" if cycle_superseded else action
+            jev_result["effective"] = {"power": want_power, "mode": want_mode, "target_temp": want_temp}
+            store.add_jev_evaluation(jev_state, jev_result)
+            store.set_state("jev_last", {"ts": store.now_jst().isoformat(timespec="seconds"), **jev_result})
 
     set_temp = None
     if aircon and aircon.target_temp:

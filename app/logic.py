@@ -47,6 +47,7 @@ class Decision:
     free_cool: bool = False        # 外気冷却モードで動いているか
     free_cool_abort: bool = False  # 室温上昇で冷房へ復帰した回か（ロックアウト開始の合図）
     switch_wait: bool = False      # 冷房⇄暖房の切替クッションで停止した回か
+    passive_wait: bool = False     # 涼しい外気に任せて停止中
 
 
 def _raw_tier(value: float, thresholds: list[float]) -> int:
@@ -243,6 +244,10 @@ def decide(
     heat_out_max: float = 20.0,
     heating_now: bool = False,
     recent_mode: str | None = None,
+    passive_wait_enabled: bool = False,
+    last_passive_wait: bool = False,
+    passive_wait_out_max: float = 20.0,
+    passive_wait_min_gap: float = 2.0,
 ) -> Decision:
     """外気温・室温・湿度から運転内容を決める（純粋関数）。
 
@@ -311,6 +316,22 @@ def decide(
         )
     mode = rt_mode if power == "on" else None
 
+    # 室温が帯内なら冷房/送風を停止し、外気に任せて観測する。
+    # 継続中は室温・外気の両方にヒステリシスを設ける。
+    passive_wait = False
+    margin = max(0.0, hyst) if last_passive_wait else 0.0
+    if (
+        passive_wait_enabled and room_target_enabled and not heating_now
+        and mode in (None, "cool", BLOW_MODE)
+        and room_target_low <= room <= room_target_high - (0.0 if last_passive_wait else max(0.0, hyst))
+        and room < free_cool_abort_room
+        and outdoor <= passive_wait_out_max + margin
+        and room - outdoor >= max(0.0, passive_wait_min_gap - margin)
+    ):
+        power, temp, vol, mode = "off", None, None, None
+        passive_wait = True
+        reason += " → 外気が十分涼しいので停止して様子見"
+
     free_cool = False
     free_cool_abort = False
 
@@ -376,4 +397,5 @@ def decide(
         free_cool=free_cool,
         free_cool_abort=free_cool_abort,
         switch_wait=switch_wait,
+        passive_wait=passive_wait,
     )

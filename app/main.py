@@ -124,6 +124,7 @@ async def status():
             "source": rt_source,
         },
         "last_note": latest["note"] if latest else "",
+        "jev": {"mode": config.JEV_MODE, "last": store.get_state("jev_last")},
         "interval_min": config.CONTROL_INTERVAL_MIN,
     }
 
@@ -132,6 +133,11 @@ async def status():
 async def history(hours: float = 24):
     hours = max(1, min(hours, 24 * 31))
     return {"rows": store.get_history(hours)}
+
+
+@app.get("/api/jev/history")
+async def jev_history(limit: int = 100):
+    return {"rows": store.get_jev_history(limit)}
 
 
 @app.post("/api/auto")
@@ -143,6 +149,7 @@ async def set_auto(body: AutoBody):
         store.set_state("last_out_tier", None)
         store.set_state("last_room_tier", None)
         store.set_state("free_cool_active", False)
+        store.set_state("passive_wait_active", False)
     return {"auto": store.auto_enabled(), "auto_state": store.auto_state()}
 
 
