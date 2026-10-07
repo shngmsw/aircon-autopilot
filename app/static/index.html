@@ -170,6 +170,7 @@
     <span class="chip" id="modeSwitchChip" style="display:none">切替待ち</span>
   </div>
   <div class="note" id="lastNote">読み込み中…</div>
+  <div class="note" id="jevNote"></div>
 </section>
 
 <!-- 操作パネル -->
@@ -348,6 +349,14 @@ function renderStatus() {
   }
   $("autoToggle").checked = state.auto;
   $("lastNote").textContent = state.last_note || "";
+  const jev = state.jev;
+  const advice = jev?.last;
+  const labels = {wait: "停止して様子見", cool: "冷房", heat: "暖房", blow: "送風", maintain: "現状維持", uncertain: "判断材料不足"};
+  const errors = {missing_api_key: "APIキー未設定", invalid_mode: "モード設定が不正", request_or_response_error: "通信または応答エラー"};
+  $("jevNote").textContent = !jev || jev.mode === "off" ? "Jev：無効" :
+    !advice ? "Jev：比較モード・判断待ち" :
+    advice.status === "ok" ? `Jev：${labels[advice.choice] || advice.choice}（信頼度 ${Math.round(advice.confidence * 100)}%、${advice.ts}）・比較のみ` :
+    `Jev：${errors[advice.reason] || advice.reason || advice.status}（${advice.ts}）・既存制御を継続`;
   if (autoState === "paused_external") {
     $("manualHint").textContent = "外部操作でオフを検知したため自動制御を一時停止しています。エアコンをオンにすると自動再開します（スイッチでも再開できます）。";
   } else {

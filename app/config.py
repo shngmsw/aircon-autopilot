@@ -90,3 +90,13 @@ HOST = os.environ.get("HOST", "0.0.0.0")
 PORT = _i("PORT", 8000)
 
 HTTP_TIMEOUT = _f("HTTP_TIMEOUT", 10.0)
+
+# Jev は比較記録のみ。off にすると外部送信しない。
+JEV_MODE = os.environ.get("JEV_MODE", "shadow").strip().lower()
+TYPESAFE_API_KEY = os.environ.get("TYPESAFE_API_KEY", "")
+JEV_MODEL = os.environ.get("JEV_MODEL", "jev-1.13.0")
+JEV_TIMEOUT = _f("JEV_TIMEOUT", 5.0)
+
+PASSIVE_WAIT_ENABLED = _b("PASSIVE_WAIT_ENABLED", False)
+PASSIVE_WAIT_OUT_MAX = _f("PASSIVE_WAIT_OUT_MAX", 20.0)
+PASSIVE_WAIT_MIN_GAP = _f("PASSIVE_WAIT_MIN_GAP", 2.0)

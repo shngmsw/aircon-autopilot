@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 import httpx
 
-from . import config, logic, remo, store, weather
+from . import config, jev, logic, remo, store, weather
 
 log = logging.getLogger(__name__)
 
@@ -185,7 +185,27 @@ async def run_cycle(client: httpx.AsyncClient) -> dict:
             heat_out_max=config.HEAT_OUT_MAX,
             heating_now=heating_now,
             recent_mode=recent_mode,
+            passive_wait_enabled=config.PASSIVE_WAIT_ENABLED,
+            last_passive_wait=bool(store.get_state("passive_wait_active", False)),
+            passive_wait_out_max=config.PASSIVE_WAIT_OUT_MAX,
+            passive_wait_min_gap=config.PASSIVE_WAIT_MIN_GAP,
         )
+        if config.JEV_MODE != "off":
+            holding_now, hold_until = _hold_active()
+            state = jev.build_state(
+                room=room, outdoor=outdoor, humidity=snap.humidity,
+                low=rt_low, high=rt_high, aircon=aircon, decision=d,
+                history=store.get_history(1), now=store.now_jst(),
+                constraints={"auto_state": store.auto_state(),
+                             "hold_active": holding_now and not skip_hold_check,
+                             "hold_until": hold_until,
+                             "switch_wait": d.switch_wait, "recent_mode": recent_mode,
+                             "free_cool_lockout": lockout_active},
+            )
+            result = await jev.evaluate(client, state)
+            store.add_jev_evaluation(state, result)
+            store.set_state("jev_last", {"ts": store.now_jst().isoformat(timespec="seconds"),
+                                         **result})
         store.set_state("last_out_tier", d.out_tier)
         store.set_state("last_room_tier", d.room_tier)
         was_free_cool = bool(store.get_state("free_cool_active", False))
@@ -295,6 +315,9 @@ async def run_cycle(client: httpx.AsyncClient) -> dict:
                 log.exception("エアコン操作に失敗")
                 action = "error"
                 note = f"操作失敗: {e}"
+
+        # 待機は実際に停止できた後に記録する。保持中や送信失敗では開始しない。
+        store.set_state("passive_wait_active", d.passive_wait and not aircon.power_on)
 
     set_temp = None
     if aircon and aircon.target_temp:

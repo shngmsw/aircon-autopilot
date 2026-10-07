@@ -35,6 +35,10 @@ def _connect() -> sqlite3.Connection:
             );
             CREATE INDEX IF NOT EXISTS idx_readings_ts ON readings(ts);
             CREATE TABLE IF NOT EXISTS state (k TEXT PRIMARY KEY, v TEXT);
+            CREATE TABLE IF NOT EXISTS jev_evaluations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL, state TEXT NOT NULL, result TEXT NOT NULL
+            );
             """
         )
         _migrate(_conn)
@@ -146,3 +150,21 @@ def latest_reading() -> dict | None:
             "SELECT * FROM readings ORDER BY id DESC LIMIT 1"
         ).fetchone()
     return dict(row) if row else None
+
+
+def add_jev_evaluation(state: dict, result: dict) -> None:
+    with _lock:
+        conn = _connect()
+        conn.execute("INSERT INTO jev_evaluations(ts, state, result) VALUES(?,?,?)",
+                     (now_jst().isoformat(timespec="seconds"), json.dumps(state), json.dumps(result)))
+        conn.commit()
+
+
+def get_jev_history(limit: int = 100) -> list[dict]:
+    with _lock:
+        rows = _connect().execute(
+            "SELECT ts, state, result FROM jev_evaluations ORDER BY id DESC LIMIT ?",
+            (max(1, min(limit, 1000)),),
+        ).fetchall()
+    return [{"ts": row["ts"], "state": json.loads(row["state"]),
+             "result": json.loads(row["result"])} for row in rows]
