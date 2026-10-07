@@ -1,0 +1,332 @@
+{
+  "assumptions": {
+    "duration_minutes": 120,
+    "sample_minutes": 10,
+    "integration_minutes": 1,
+    "target_band": [
+      21,
+      24
+    ],
+    "thermal_model": "hypothetical first-order model, not fitted to real data",
+    "cooling_rate_c_per_hour": 1.8,
+    "heating_rate_c_per_hour": 2.4,
+    "free_cool": false,
+    "reason": "isolates stop-and-wait from the existing fan policy",
+    "jev": "real Jev decisions drive mocked appliances",
+    "energy": "modeled active minutes are not measured electricity or compressor runtime"
+  },
+  "scenarios": {
+    "passive_cooling": {
+      "parameters": {
+        "name": "passive_cooling",
+        "room": 22.1,
+        "outdoor": 19.3,
+        "conductance": 0.08,
+        "load": 0.15,
+        "initial_mode": "cool",
+        "missing_at": null,
+        "manual_at": null,
+        "heating_tail": 0.0
+      },
+      "baseline": {
+        "outside_band_minutes": 0,
+        "max_deviation_c": 0.0,
+        "modeled_active_minutes": 0,
+        "commands": 0,
+        "starts": 0,
+        "cool_heat_switches": 0,
+        "safety_violations": 0,
+        "jev_calls": 0,
+        "jev_accepted": 0,
+        "jev_applied": 0,
+        "jev_api_failures": 0
+      },
+      "jev_control": {
+        "outside_band_minutes": 0,
+        "max_deviation_c": 0.0,
+        "modeled_active_minutes": 0,
+        "commands": 1,
+        "starts": 0,
+        "cool_heat_switches": 0,
+        "safety_violations": 0,
+        "jev_calls": 12,
+        "jev_accepted": 12,
+        "jev_applied": 1,
+        "jev_api_failures": 0
+      }
+    },
+    "insulated_room": {
+      "parameters": {
+        "name": "insulated_room",
+        "room": 22.1,
+        "outdoor": 19.3,
+        "conductance": 0.01,
+        "load": 0.4,
+        "initial_mode": "cool",
+        "missing_at": null,
+        "manual_at": null,
+        "heating_tail": 0.0
+      },
+      "baseline": {
+        "outside_band_minutes": 0,
+        "max_deviation_c": 0.0,
+        "modeled_active_minutes": 0,
+        "commands": 0,
+        "starts": 0,
+        "cool_heat_switches": 0,
+        "safety_violations": 0,
+        "jev_calls": 0,
+        "jev_accepted": 0,
+        "jev_applied": 0,
+        "jev_api_failures": 0
+      },
+      "jev_control": {
+        "outside_band_minutes": 0,
+        "max_deviation_c": 0.0,
+        "modeled_active_minutes": 0,
+        "commands": 1,
+        "starts": 0,
+        "cool_heat_switches": 0,
+        "safety_violations": 0,
+        "jev_calls": 12,
+        "jev_accepted": 12,
+        "jev_applied": 1,
+        "jev_api_failures": 0
+      }
+    },
+    "solar_gain": {
+      "parameters": {
+        "name": "solar_gain",
+        "room": 22.1,
+        "outdoor": 19.3,
+        "conductance": 0.04,
+        "load": 1.0,
+        "initial_mode": "cool",
+        "missing_at": null,
+        "manual_at": null,
+        "heating_tail": 0.0
+      },
+      "baseline": {
+        "outside_band_minutes": 0,
+        "max_deviation_c": 0.0,
+        "modeled_active_minutes": 27,
+        "commands": 0,
+        "starts": 0,
+        "cool_heat_switches": 0,
+        "safety_violations": 0,
+        "jev_calls": 0,
+        "jev_accepted": 0,
+        "jev_applied": 0,
+        "jev_api_failures": 0
+      },
+      "jev_control": {
+        "outside_band_minutes": 0,
+        "max_deviation_c": 0.0,
+        "modeled_active_minutes": 0,
+        "commands": 1,
+        "starts": 0,
+        "cool_heat_switches": 0,
+        "safety_violations": 0,
+        "jev_calls": 12,
+        "jev_accepted": 12,
+        "jev_applied": 1,
+        "jev_api_failures": 0
+      }
+    },
+    "warm_outdoors": {
+      "parameters": {
+        "name": "warm_outdoors",
+        "room": 22.1,
+        "outdoor": 26,
+        "conductance": 0.04,
+        "load": 0.5,
+        "initial_mode": "cool",
+        "missing_at": null,
+        "manual_at": null,
+        "heating_tail": 0.0
+      },
+      "baseline": {
+        "outside_band_minutes": 0,
+        "max_deviation_c": 0.0,
+        "modeled_active_minutes": 12,
+        "commands": 0,
+        "starts": 0,
+        "cool_heat_switches": 0,
+        "safety_violations": 0,
+        "jev_calls": 0,
+        "jev_accepted": 0,
+        "jev_applied": 0,
+        "jev_api_failures": 0
+      },
+      "jev_control": {
+        "outside_band_minutes": 0,
+        "max_deviation_c": 0.0,
+        "modeled_active_minutes": 0,
+        "commands": 1,
+        "starts": 0,
+        "cool_heat_switches": 0,
+        "safety_violations": 0,
+        "jev_calls": 12,
+        "jev_accepted": 11,
+        "jev_applied": 1,
+        "jev_api_failures": 0
+      }
+    },
+    "winter_heating": {
+      "parameters": {
+        "name": "winter_heating",
+        "room": 19.5,
+        "outdoor": 5,
+        "conductance": 0.04,
+        "load": 0.2,
+        "initial_mode": "warm",
+        "missing_at": null,
+        "manual_at": null,
+        "heating_tail": 0.0
+      },
+      "baseline": {
+        "outside_band_minutes": 45,
+        "max_deviation_c": 1.47,
+        "modeled_active_minutes": 70,
+        "commands": 3,
+        "starts": 0,
+        "cool_heat_switches": 0,
+        "safety_violations": 0,
+        "jev_calls": 0,
+        "jev_accepted": 0,
+        "jev_applied": 0,
+        "jev_api_failures": 0
+      },
+      "jev_control": {
+        "outside_band_minutes": 45,
+        "max_deviation_c": 1.47,
+        "modeled_active_minutes": 70,
+        "commands": 3,
+        "starts": 0,
+        "cool_heat_switches": 0,
+        "safety_violations": 0,
+        "jev_calls": 12,
+        "jev_accepted": 11,
+        "jev_applied": 2,
+        "jev_api_failures": 0
+      }
+    },
+    "heating_afterglow": {
+      "parameters": {
+        "name": "heating_afterglow",
+        "room": 24.2,
+        "outdoor": 10,
+        "conductance": 0.04,
+        "load": 0.2,
+        "initial_mode": "warm",
+        "missing_at": null,
+        "manual_at": null,
+        "heating_tail": 0.8
+      },
+      "baseline": {
+        "outside_band_minutes": 63,
+        "max_deviation_c": 0.26,
+        "modeled_active_minutes": 33,
+        "commands": 2,
+        "starts": 1,
+        "cool_heat_switches": 1,
+        "safety_violations": 0,
+        "jev_calls": 0,
+        "jev_accepted": 0,
+        "jev_applied": 0,
+        "jev_api_failures": 0
+      },
+      "jev_control": {
+        "outside_band_minutes": 85,
+        "max_deviation_c": 0.26,
+        "modeled_active_minutes": 0,
+        "commands": 1,
+        "starts": 0,
+        "cool_heat_switches": 0,
+        "safety_violations": 0,
+        "jev_calls": 12,
+        "jev_accepted": 12,
+        "jev_applied": 1,
+        "jev_api_failures": 0
+      }
+    },
+    "missing_sensor": {
+      "parameters": {
+        "name": "missing_sensor",
+        "room": 22.1,
+        "outdoor": 19.3,
+        "conductance": 0.04,
+        "load": 0.2,
+        "initial_mode": "cool",
+        "missing_at": 6,
+        "manual_at": null,
+        "heating_tail": 0.0
+      },
+      "baseline": {
+        "outside_band_minutes": 0,
+        "max_deviation_c": 0.0,
+        "modeled_active_minutes": 0,
+        "commands": 0,
+        "starts": 0,
+        "cool_heat_switches": 0,
+        "safety_violations": 0,
+        "jev_calls": 0,
+        "jev_accepted": 0,
+        "jev_applied": 0,
+        "jev_api_failures": 0
+      },
+      "jev_control": {
+        "outside_band_minutes": 0,
+        "max_deviation_c": 0.0,
+        "modeled_active_minutes": 0,
+        "commands": 1,
+        "starts": 0,
+        "cool_heat_switches": 0,
+        "safety_violations": 0,
+        "jev_calls": 11,
+        "jev_accepted": 11,
+        "jev_applied": 1,
+        "jev_api_failures": 0
+      }
+    },
+    "manual_stop": {
+      "parameters": {
+        "name": "manual_stop",
+        "room": 22.1,
+        "outdoor": 19.3,
+        "conductance": 0.04,
+        "load": 0.2,
+        "initial_mode": "cool",
+        "missing_at": null,
+        "manual_at": 6,
+        "heating_tail": 0.0
+      },
+      "baseline": {
+        "outside_band_minutes": 0,
+        "max_deviation_c": 0.0,
+        "modeled_active_minutes": 0,
+        "commands": 0,
+        "starts": 0,
+        "cool_heat_switches": 0,
+        "safety_violations": 0,
+        "jev_calls": 0,
+        "jev_accepted": 0,
+        "jev_applied": 0,
+        "jev_api_failures": 0
+      },
+      "jev_control": {
+        "outside_band_minutes": 0,
+        "max_deviation_c": 0.0,
+        "modeled_active_minutes": 0,
+        "commands": 1,
+        "starts": 0,
+        "cool_heat_switches": 0,
+        "safety_violations": 0,
+        "jev_calls": 6,
+        "jev_accepted": 6,
+        "jev_applied": 1,
+        "jev_api_failures": 0
+      }
+    }
+  }
+}

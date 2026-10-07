@@ -1,10 +1,11 @@
-"""Jev の運転方針を比較記録する。実機の判断は変更しない。"""
+"""Jev の運転方針と、既存の制約を守る実制御への変換。"""
 import math
+from dataclasses import replace
 from datetime import datetime
 
 import httpx
 
-from . import config
+from . import config, logic, remo
 
 API = "https://api.typesafe.ai/v1/systemone"
 OPTIONS = {
@@ -74,7 +75,7 @@ def _probability(value):
 async def evaluate(client: httpx.AsyncClient, state: dict) -> dict:
     if config.JEV_MODE == "off":
         return {"status": "disabled"}
-    if config.JEV_MODE != "shadow":
+    if config.JEV_MODE not in ("shadow", "active"):
         return {"status": "unavailable", "reason": "invalid_mode"}
     if not config.TYPESAFE_API_KEY:
         return {"status": "unavailable", "reason": "missing_api_key"}
@@ -85,12 +86,16 @@ async def evaluate(client: httpx.AsyncClient, state: dict) -> dict:
                 "operation": {"type": "choice", "instructions":
                     "Choose the overall appliance operation: wait, cool, heat, blow, maintain, or uncertain. "
                     "Consider comfort, humidity, recent operation, temperature trends and energy use. "
+                    "The baseline is a reference, not the correct answer. "
+                    "Comfortable temperature while cooling is on does not prove continued cooling is necessary. "
+                    "Consider switching off to observe when the room is comfortable and outdoors is colder; "
+                    "avoid starting cooling within the target band unless rising temperature makes it necessary. "
                     "Respect supported_modes and constraints; do not override manual suspension or switching/hold restrictions. "
                     "Prefer avoiding unnecessary energy use for small overshoots. "
                     "Cold outdoor air alone does not prove passive cooling. "
                     "A decline while cooling was on is not evidence of passive cooling. "
                     "Use the precomputed differences and passive_trend; do not predict numeric temperatures. "
-                    "Choose uncertain when evidence is insufficient. This is advisory only.",
+                    "Choose uncertain when evidence is insufficient. Code enforces constraints and sets numeric temperatures.",
                     "criteria": OPTIONS}}}, timeout=config.JEV_TIMEOUT,
         )
         response.raise_for_status()
@@ -110,3 +115,91 @@ async def evaluate(client: httpx.AsyncClient, state: dict) -> dict:
     except (httpx.RequestError, ValueError, KeyError, TypeError):
         # レスポンスや例外本文には認証情報が含まれ得るため保存・ログ出力しない。
         return {"status": "unavailable", "reason": "request_or_response_error"}
+
+
+def select_decision(baseline, result, *, aircon, room, outdoor, low, high,
+                    holding=False, recent_mode=None, lockout=False):
+    """Return the effective decision and why an override was accepted/rejected.
+
+    Numeric setpoints remain deterministic. This function never sends commands.
+    """
+    if config.JEV_MODE != "active":
+        return baseline, "shadow"
+    if result.get("status") != "ok" or result.get("choice") == "uncertain":
+        return baseline, "unavailable_or_uncertain"
+    choice = result["choice"]
+    if not (0 <= config.JEV_MIN_CONFIDENCE <= 1 and 0 <= config.JEV_MIN_PROBABILITY <= 1):
+        return baseline, "invalid_threshold"
+    if (result["confidence"] < config.JEV_MIN_CONFIDENCE
+            or result["probabilities"][choice] < config.JEV_MIN_PROBABILITY):
+        return baseline, "low_confidence"
+    if holding:
+        return baseline, "holding"
+    if not config.ROOM_TARGET_ENABLED:
+        return baseline, "room_target_disabled"
+
+    if choice == "maintain":
+        power = "on" if aircon.power_on else "off"
+        mode = aircon.mode if aircon.power_on else None
+    else:
+        power = "off" if choice == "wait" else "on"
+        mode = {"cool": "cool", "heat": logic.WARM_MODE, "blow": logic.BLOW_MODE}.get(choice)
+    if power == "off":
+        if room >= config.FREE_COOL_ABORT_ROOM or room < low - max(0, config.HYSTERESIS):
+            return baseline, "temperature_limit"
+    else:
+        if not remo.supports_mode(aircon, mode):
+            return baseline, "unsupported_mode"
+        if mode == logic.WARM_MODE:
+            if outdoor >= config.HEAT_OUT_MAX:
+                return baseline, "heating_outdoor_limit"
+            heat_off = min(low + config.HYSTERESIS, high)
+            if room >= (heat_off if choice == "maintain" else low):
+                return baseline, "heating_room_limit"
+            if recent_mode in ("cool", logic.BLOW_MODE):
+                return baseline, "switch_wait"
+        else:
+            if room < low:
+                return baseline, "cooling_room_limit"
+            if recent_mode == logic.WARM_MODE:
+                return baseline, "switch_wait"
+            if mode == logic.BLOW_MODE and (lockout or room >= config.FREE_COOL_ABORT_ROOM):
+                return baseline, "fan_limit"
+
+    temp = None
+    volume = None
+    if power == "on":
+        if choice == "maintain":
+            try:
+                temp = float(aircon.target_temp) if mode != logic.BLOW_MODE else None
+                if temp is not None and not math.isfinite(temp):
+                    return baseline, "invalid_current_temperature"
+            except (TypeError, ValueError):
+                return baseline, "invalid_current_temperature"
+            if temp is not None and (not config.ROOM_TARGET_SET_MIN <= temp <= config.ROOM_TARGET_SET_MAX
+                                     or mode == logic.WARM_MODE and temp > high):
+                return baseline, "current_temperature_limit"
+            volume = None  # Keep the appliance's existing fan setting.
+        elif mode == logic.BLOW_MODE:
+            volume = "min"
+        else:
+            try:
+                current = float(aircon.target_temp) if aircon.power_on and aircon.mode == mode else None
+                if current is not None and not math.isfinite(current):
+                    return baseline, "invalid_current_temperature"
+            except (TypeError, ValueError):
+                current = None
+            _, temp, _, _ = logic.room_target_setpoint(
+                room, current, low, high, config.ROOM_TARGET_GAIN,
+                config.ROOM_TARGET_SET_MIN, config.ROOM_TARGET_SET_MAX,
+                config.ROOM_TARGET_DEADBAND, heat_allowed=mode == logic.WARM_MODE,
+                heating_now=mode == logic.WARM_MODE and aircon.power_on and aircon.mode == mode,
+                hyst=config.HYSTERESIS,
+            )
+            # Within the band a cooling start uses the upper target, without lowering it.
+            if temp is None and mode == "cool":
+                temp = high
+            volume = "max" if max(room - high, low - room) >= config.ROOM_TARGET_MAX_VOL_OVER else "auto"
+    return replace(baseline, power=power, mode=mode, target_temp=temp, volume_pref=volume,
+                   free_cool=False, free_cool_abort=False, switch_wait=False, passive_wait=False,
+                   reason=f"Jev: {choice}（信頼度{result['confidence']:.0%}）"), "accepted"

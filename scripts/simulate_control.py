@@ -52,7 +52,7 @@ def appliance(mode="cool"):
                            options["cool"]["temp"], ["1", "auto"], list(options), options)
 
 
-async def simulate(scenario, enabled):
+async def simulate(scenario, enabled, *, client=None, active_jev=False, minutes=480):
     """Exercise the actual controller, SQLite, holds, switching and rounding.
 
     Remo reads/writes and weather are replaced before any cycle runs.
@@ -85,7 +85,7 @@ async def simulate(scenario, enabled):
     with tempfile.TemporaryDirectory() as tmp:
         previous_conn = store._conn
         store._conn = None
-        overrides = dict(DB_PATH=str(Path(tmp) / "aircon.db"), JEV_MODE="off",
+        overrides = dict(DB_PATH=str(Path(tmp) / "aircon.db"), JEV_MODE="active" if active_jev else "off",
                          PASSIVE_WAIT_ENABLED=enabled, ROOM_TARGET_ENABLED=True,
                          ROOM_TARGET_LOW=21., ROOM_TARGET_HIGH=24., HYSTERESIS=.7,
                          FREE_COOL_ENABLED=False, MIN_HOLD_MIN=10,
@@ -98,13 +98,13 @@ async def simulate(scenario, enabled):
             with patch.multiple(config, **overrides), patch.object(store, "now_jst", lambda: clock[0]), \
                  patch.object(remo, "fetch_snapshot", snapshot), patch.object(remo, "apply_settings", apply), \
                  patch.object(controller.weather, "get_outdoor_temp", weather):
-                for step in range(48):
+                for step in range(minutes // 10):
                     cycle[0] = step
                     if step == scenario.manual_at:
                         ac.power_on = False
                         store.set_auto_state("off")
                     count = len(commands)
-                    result = await controller.run_cycle(None)
+                    result = await controller.run_cycle(client)
                     if step == scenario.missing_at and len(commands) != count:
                         violations += 1
                     if scenario.manual_at is not None and step >= scenario.manual_at and len(commands) != count:
@@ -112,6 +112,7 @@ async def simulate(scenario, enabled):
                     samples.append({"minute": step * 10, "room": round(room[0], 3),
                                     "outdoor": scenario.outdoor, "power": "on" if ac.power_on else "off",
                                     "set_temp": ac.target_temp,
+                                    "jev": store.get_state("jev_last") if active_jev else None,
                                     "mode": ac.mode if ac.power_on else None, "note": result["note"]})
                     for _ in range(10):
                         rate = scenario.conductance * (scenario.outdoor - room[0]) + scenario.load + heating_tail
@@ -130,10 +131,15 @@ async def simulate(scenario, enabled):
                 on_commands = [c for c in commands if c["power"] == "on"]
                 modes = [scenario.initial_mode] + [c["mode"] for c in on_commands]
                 switches = sum(a != b for a, b in zip(modes, modes[1:]))
+                evaluations = store.get_jev_history(1000) if active_jev else []
                 metrics = {"outside_band_minutes": outside_minutes, "max_deviation_c": round(max_deviation, 2),
                            "modeled_active_minutes": active_minutes, "commands": len(commands),
                            "starts": sum(c["start"] for c in commands),
-                           "cool_heat_switches": switches, "safety_violations": violations}
+                           "cool_heat_switches": switches, "safety_violations": violations,
+                           "jev_calls": len(evaluations),
+                           "jev_accepted": sum(e["result"].get("accepted", False) for e in evaluations),
+                           "jev_applied": sum(e["result"].get("applied", False) for e in evaluations),
+                           "jev_api_failures": sum(e["result"]["status"] != "ok" for e in evaluations)}
         finally:
             if store._conn:
                 store._conn.close()
@@ -175,23 +181,28 @@ def replay(rows):
 
 async def run(args):
     logging.getLogger().setLevel(logging.ERROR)
-    report = {"assumptions": {"duration_minutes": 480, "sample_minutes": 10,
+    if args.minutes < 10 or args.minutes % 10:
+        raise ValueError("--minutes must be a positive multiple of 10")
+    report = {"assumptions": {"duration_minutes": args.minutes, "sample_minutes": 10,
                "integration_minutes": 1, "target_band": [21, 24],
                "thermal_model": "hypothetical first-order model, not fitted to real data",
                "cooling_rate_c_per_hour": 1.8, "heating_rate_c_per_hour": 2.4,
                "free_cool": False, "reason": "isolates stop-and-wait from the existing fan policy",
-               "jev": "advisory only; recommendations do not drive the thermal model",
+               "jev": "real Jev decisions drive mocked appliances" if args.jev_control else
+                      "advisory only; recommendations do not drive the thermal model",
                "energy": "modeled active minutes are not measured electricity or compressor runtime"}, "scenarios": {}}
     for scenario in SCENARIOS:
         report["scenarios"][scenario.name] = {
-            "parameters": vars(scenario), "baseline": await simulate(scenario, False),
-            "changed": await simulate(scenario, True)}
+            "parameters": vars(scenario), "baseline": await simulate(scenario, False, minutes=args.minutes),
+            "changed": await simulate(scenario, True, minutes=args.minutes)}
     if args.history:
         rows = json.loads(Path(args.history).read_text())["rows"]
         if any(datetime.fromisoformat(a["ts"]) > datetime.fromisoformat(b["ts"]) for a, b in zip(rows, rows[1:])):
             raise ValueError("History must be sorted by timestamp")
         report["replay"] = replay(rows)
     if args.jev:
+        if args.minutes < 70:
+            raise ValueError("--jev requires at least 70 simulated minutes")
         if not config.TYPESAFE_API_KEY:
             raise RuntimeError("TYPESAFE_API_KEY is required for --jev")
         import httpx
@@ -221,6 +232,15 @@ async def run(args):
                     report["scenarios"][scenario.name]["jev"] = result
                     if result["status"] != "ok":
                         raise RuntimeError(f"Jev validation failed: {result.get('reason')}")
+    if args.jev_control:
+        if not config.TYPESAFE_API_KEY:
+            raise RuntimeError("TYPESAFE_API_KEY is required for --jev-control")
+        import httpx
+        async with httpx.AsyncClient() as client:
+            for scenario in SCENARIOS:
+                report["scenarios"][scenario.name]["jev_control"] = await simulate(
+                    scenario, False, client=client, active_jev=True, minutes=args.minutes)
+                print("Jev control completed:", scenario.name, flush=True)
     Path(args.output).write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
     for name, data in report["scenarios"].items():
         print(name, json.dumps({k: data[k]["metrics"] for k in ("baseline", "changed")}))
@@ -232,5 +252,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--history", help="Optional uploaded history JSON; never calls the production server")
     parser.add_argument("--jev", action="store_true", help="Make 6 advisory API calls using one hour of synthetic history")
+    parser.add_argument("--jev-control", action="store_true", help="Use real Jev decisions in the simulated controller; Remo operations remain mocked")
+    parser.add_argument("--minutes", type=int, default=480)
     parser.add_argument("--output", default="/tmp/aircon-simulation.json")
     asyncio.run(run(parser.parse_args()))

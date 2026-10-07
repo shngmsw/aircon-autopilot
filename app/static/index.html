@@ -354,8 +354,8 @@ function renderStatus() {
   const labels = {wait: "停止して様子見", cool: "冷房", heat: "暖房", blow: "送風", maintain: "現状維持", uncertain: "判断材料不足"};
   const errors = {missing_api_key: "APIキー未設定", invalid_mode: "モード設定が不正", request_or_response_error: "通信または応答エラー"};
   $("jevNote").textContent = !jev || jev.mode === "off" ? "Jev：無効" :
-    !advice ? "Jev：比較モード・判断待ち" :
-    advice.status === "ok" ? `Jev：${labels[advice.choice] || advice.choice}（信頼度 ${Math.round(advice.confidence * 100)}%、${advice.ts}）・比較のみ` :
+    !advice ? `Jev：${jev.mode === "active" ? "実制御" : "比較モード"}・判断待ち` :
+    advice.status === "ok" ? `Jev：${labels[advice.choice] || advice.choice}（信頼度 ${Math.round(advice.confidence * 100)}%、${advice.ts}）・${advice.applied ? "操作実行" : advice.accepted ? "方針採用・操作なし" : jev.mode === "shadow" ? "比較のみ" : "既存制御を採用"}` :
     `Jev：${errors[advice.reason] || advice.reason || advice.status}（${advice.ts}）・既存制御を継続`;
   if (autoState === "paused_external") {
     $("manualHint").textContent = "外部操作でオフを検知したため自動制御を一時停止しています。エアコンをオンにすると自動再開します（スイッチでも再開できます）。";
